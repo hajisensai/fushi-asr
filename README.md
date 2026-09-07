@@ -12,6 +12,8 @@
   包括内置 17 种以外的语言（`asr models export-manifest` 导个模板出来改）。
 - **三种输出**：SRT / WebVTT / JSON。
 - **三种用法**：命令行、HTTP API、服务端自带的网页界面。
+- **有声书对齐**（`asr_align`）：把字幕 cue 与 EPUB 正文逐句对上，用锚点回填捞回漏配的段，
+  再用逐 token 发射时间按正文句界重切——「一条 cue 盖了好几句」实测 18 → 0。
 
 ## 快速开始
 
@@ -95,6 +97,7 @@ const res = await fetch('/v1/transcribe?language=ja', { method: 'POST', body: fi
 |---|---|---|
 | `asr_core` | 纯 Dart 转录核心：VAD 分段、fbank、RNN-T 贪心 Loop 图 / CTC 解码、攒批分桶、fp16 图转换、模型清单与下载、SRT 产出。**零 Flutter、零 dart:ffi、不自带 ONNX 后端** | `meta` `path` `crypto` |
 | `asr_onnx_ffi` | ONNX Runtime 的 dart:ffi 后端（CPU / DirectML / CUDA） | `asr_core` `ffi` |
+| `asr_align` | EPUB / 文本 ↔ 音频对齐：句级 Dice 匹配（含 ruby 读音轨）、锚点间隙回填、按正文句界重切 cue | `asr_core` |
 | `asr` | 门面：一步到位的 `TranscribeRunner` + 字幕格式 | 上面两个 |
 | `asr_server` | HTTP 服务端与客户端 + 网页界面 | `asr` |
 | `asr_cli` | `asr` 命令行 | `asr` `asr_server` `args` |
@@ -108,6 +111,7 @@ Flutter 宿主注入自己的插件后端，服务端注入 FFI 后端，同一�
 dart analyze packages
 cd packages/asr_core && dart test        # 326 条
 cd packages/asr_onnx_ffi && dart test    # 15 条，要真 onnxruntime（没有就整组 skip）
+cd packages/asr_align && dart test       # 15 条
 cd packages/asr && dart test             # 10 条
 cd packages/asr_server && dart test      # 10 条
 ```

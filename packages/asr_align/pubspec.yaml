@@ -1,0 +1,16 @@
+name: asr_align
+description: EPUB / 文本 ↔ 音频对齐：句级匹配、锚点回填、按正文句界重切 cue。
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+
+dependencies:
+  asr_core: ^0.1.0
+  meta: ^1.15.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

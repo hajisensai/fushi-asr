@@ -6,6 +6,7 @@ environment:
 
 workspace:
   - packages/asr
+  - packages/asr_align
   - packages/asr_cli
   - packages/asr_core
   - packages/asr_onnx_ffi
