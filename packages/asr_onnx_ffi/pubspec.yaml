@@ -1,0 +1,19 @@
+name: asr_onnx_ffi
+description: asr_core 的纯 Dart ONNX Runtime 后端（dart:ffi），给 CLI 与服务端用。
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+
+dependencies:
+  asr_core: ^0.1.0
+  ffi: ^2.1.0
+  meta: ^1.15.0
+  path: ^1.9.0
+
+dev_dependencies:
+  ffigen: ^19.0.0
+  lints: ^5.0.0
+  test: ^1.25.0

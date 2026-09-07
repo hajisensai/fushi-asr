@@ -1,0 +1,4 @@
+tags:
+  ort:
+    # 需要真实 onnxruntime 动态库的用例；库不在时整组自己 skip。
+    skip: false

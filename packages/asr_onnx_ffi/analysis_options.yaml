@@ -1,0 +1,9 @@
+include: package:lints/recommended.yaml
+
+analyzer:
+  exclude:
+    # ffigen 产物：机器生成，不参与风格检查（重新生成会覆盖任何手改）。
+    - lib/src/ffi/onnxruntime_bindings.dart
+  language:
+    strict-casts: true
+    strict-raw-types: true

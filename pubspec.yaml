@@ -6,3 +6,4 @@ environment:
 
 workspace:
   - packages/asr_core
+  - packages/asr_onnx_ffi

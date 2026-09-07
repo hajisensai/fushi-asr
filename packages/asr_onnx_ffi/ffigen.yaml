@@ -1,0 +1,23 @@
+# ORT C API 的 dart:ffi 绑定生成配置。
+#
+# 重新生成：`dart run ffigen --config ffigen.yaml`（需本机装 LLVM/libclang）。
+# 产物已入库，普通使用者无需装 LLVM。
+#
+# 只喂 onnxruntime_c_api.h 一个入口：ORT 的 dml_provider_factory.h 顶部 include
+# <d3d12.h> / <DirectML.h>，还在 __cplusplus 分支里定义 operator| 重载，不是合法的
+# FFI 输入。DirectML 的 OrtDmlApi 因此是手写绑定（见 dml_api.dart）。
+name: OnnxRuntimeBindings
+description: ONNX Runtime 1.22.0 C API（MIT，头文件 vendored 在 third_party/）
+output: 'lib/src/ffi/onnxruntime_bindings.dart'
+headers:
+  entry-points:
+    - '../../third_party/onnxruntime/include/onnxruntime_c_api.h'
+  include-directives:
+    - '**onnxruntime_c_api.h'
+compiler-opts:
+  # 走头文件里的 __GNUC__ 分支，避开只有 Windows SDK 才有的 <specstrings.h>。
+  - '-D__GNUC__=4'
+preamble: |
+  // 机器生成，勿手改。重新生成见 packages/asr_onnx_ffi/ffigen.yaml。
+  // ignore_for_file: always_specify_types, camel_case_types, non_constant_identifier_names
+  // ignore_for_file: unused_element, unused_field, public_member_api_docs
