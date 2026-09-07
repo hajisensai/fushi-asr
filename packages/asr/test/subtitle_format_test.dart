@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:asr/asr.dart';
+import 'package:fushi_asr/asr.dart';
 import 'package:test/test.dart';
 
 const String _srt = '''

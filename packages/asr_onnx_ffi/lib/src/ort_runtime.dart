@@ -9,7 +9,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
 
-import 'package:asr_onnx_ffi/src/ffi/onnxruntime_bindings.dart';
+import 'package:fushi_asr_onnx_ffi/src/ffi/onnxruntime_bindings.dart';
 
 /// 本包生成绑定所依据的头文件版本对应的 API 版本号。
 ///

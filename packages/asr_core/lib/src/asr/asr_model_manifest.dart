@@ -64,8 +64,8 @@ import 'dart:io';
 
 import 'package:meta/meta.dart';
 
-import 'package:asr_core/src/asr/asr_model_registry.dart';
-import 'package:asr_core/src/onnx/model_file_downloader.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_registry.dart';
+import 'package:fushi_asr_core/src/onnx/model_file_downloader.dart';
 
 /// 转录语言。持久化用 [AsrLanguage.tag]（BCP-47 主子标签；粤语用 ISO 639-3
 /// `yue` 与普通话 `zh` 区分——它们是两种口语，不是两种书写），不要存枚举下标。

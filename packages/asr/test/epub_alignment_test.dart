@@ -1,5 +1,5 @@
-import 'package:asr/asr.dart';
-import 'package:asr_align/asr_align.dart';
+import 'package:fushi_asr/asr.dart';
+import 'package:fushi_asr_align/asr_align.dart';
 import 'package:test/test.dart';
 
 void main() {

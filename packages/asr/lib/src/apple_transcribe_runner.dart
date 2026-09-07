@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:asr_core/asr_core.dart';
+import 'package:fushi_asr_core/asr_core.dart';
 import 'subtitle_format.dart';
 import 'transcribe_runner.dart';
 import 'cancellation.dart';

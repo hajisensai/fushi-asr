@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
-import 'package:asr_core/asr_core.dart';
-import 'package:asr_onnx_ffi/asr_onnx_ffi.dart';
+import 'package:fushi_asr_core/asr_core.dart';
+import 'package:fushi_asr_onnx_ffi/asr_onnx_ffi.dart';
 
 Future<void> main(List<String> args) async {
   if (args.isEmpty) throw ArgumentError('encoder.onnx [--static] [--basic]');

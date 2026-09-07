@@ -6,7 +6,7 @@
 
 | 项 | 决定 |
 |---|---|
-| 仓库 | `hajisensai/fushi-asr` |
+| 仓库 | `hajisensai/fushi-subtitles` |
 | 许可 | GPL-3.0（与 Hibiki 一致，零冲突） |
 | 形态 | **只做服务端**。转录一律在服务端（本机或远程主机）跑，CLI 与界面都是调用方；**不做浏览器端 WASM 推理** |
 | 范围 | ASR 转录核心 **+** 对齐层（EPUB/文本 ↔ 音频匹配、句界重切、CTC 强制对齐） |
@@ -133,7 +133,7 @@ asr models list | pull <id> | path
 ```yaml
 dependencies:
   asr_core:
-    git: {url: https://github.com/hajisensai/fushi-asr.git, path: packages/asr_core, ref: <tag>}
+    git: {url: https://github.com/hajisensai/fushi-subtitles.git, path: packages/asr_core, ref: <tag>}
   asr_align:
     git: {url: ..., path: packages/asr_align, ref: <tag>}
 ```

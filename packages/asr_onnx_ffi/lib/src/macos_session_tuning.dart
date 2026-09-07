@@ -1,4 +1,4 @@
-import 'package:asr_core/asr_core.dart';
+import 'package:fushi_asr_core/asr_core.dart';
 
 /// Per-session macOS diagnostics. Other platforms return caller options intact.
 class MacOsSessionTuning {

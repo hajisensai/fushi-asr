@@ -15,7 +15,7 @@ import 'dart:math' as math;
 
 import 'dart:typed_data';
 import 'package:meta/meta.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 /// 字符级词表的「文本 → token id」编码器（强制对齐要把正文编码成模型 token 序列）。
 ///

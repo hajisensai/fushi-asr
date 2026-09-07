@@ -4,8 +4,8 @@
 // 库路径经 ASR_ONNXRUNTIME_LIB 指定。
 import 'dart:io';
 
-import 'package:asr_core/asr_core.dart';
-import 'package:asr_onnx_ffi/asr_onnx_ffi.dart';
+import 'package:fushi_asr_core/asr_core.dart';
+import 'package:fushi_asr_onnx_ffi/asr_onnx_ffi.dart';
 
 Future<void> main(List<String> args) async {
   final OrtRuntime rt = OrtRuntime.instance();

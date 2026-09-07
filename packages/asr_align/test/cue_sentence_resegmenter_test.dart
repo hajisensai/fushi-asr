@@ -1,6 +1,6 @@
 import 'package:test/test.dart';
-import 'package:asr_core/asr_core.dart';
-import 'package:asr_align/asr_align.dart';
+import 'package:fushi_asr_core/asr_core.dart';
+import 'package:fushi_asr_align/asr_align.dart';
 
 /// 造一条带逐 token 时间的 ASR cue：字符级 token（每个字一个 token），
 /// [times] 是各 token 相对 cue 起点的发射时刻。

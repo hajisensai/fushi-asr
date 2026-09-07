@@ -25,13 +25,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:meta/meta.dart';
-import 'package:asr_core/src/util/collections.dart';
+import 'package:fushi_asr_core/src/util/collections.dart';
 import 'package:path/path.dart' as p;
 
-import 'package:asr_core/src/asr/asr_cue_builder.dart';
-import 'package:asr_core/src/asr/asr_transducer_decoder.dart'
+import 'package:fushi_asr_core/src/asr/asr_cue_builder.dart';
+import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart'
     show AsrBatchFeatures, AsrDecodeStats, AsrEncodedBatch;
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 /// 流式 VAD 切段器（`AsrVadSegmenter` 实现之）。
 abstract interface class AsrSegmenter {

@@ -1,4 +1,4 @@
-/// `asr_core` 的纯 Dart ONNX Runtime 后端。
+/// `fushi_asr_core` 的纯 Dart ONNX Runtime 后端。
 ///
 /// 给没有 Flutter 引擎的宿主用（CLI / 服务端）。装配：
 ///

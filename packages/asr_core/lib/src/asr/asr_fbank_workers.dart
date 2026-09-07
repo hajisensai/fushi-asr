@@ -16,8 +16,8 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:asr_core/src/asr/asr_fbank.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_fbank.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 /// 默认 worker 数：每 4 个逻辑核一个，1~4 个。fbank 一批的活只有 ~130 ms，
 /// 再多 worker 摊不到什么，spawn 的固定开销反而占比上去。

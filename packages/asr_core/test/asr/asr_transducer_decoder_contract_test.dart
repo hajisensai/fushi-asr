@@ -1,10 +1,10 @@
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/asr/asr_transducer_decoder.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 /// `AsrTransducerDecoder` 的两个模型包契约参数：
 /// - `contextSize`（MDCC 粤语 decoder `y[N,1]`）；

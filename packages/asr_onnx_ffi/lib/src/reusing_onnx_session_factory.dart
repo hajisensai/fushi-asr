@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:asr_core/asr_core.dart';
+import 'package:fushi_asr_core/asr_core.dart';
 
 /// Explicitly owned, single-isolate pool. Each borrower gets an exclusive lease;
 /// closing a lease returns it to the pool, closing the pool frees native memory.

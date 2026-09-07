@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/asr/asr_model_registry.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_registry.dart';
 import 'package:test/test.dart';
 
 /// 一个最小的自带包 JSON：只写 id / languages / files，其余全走缺省。

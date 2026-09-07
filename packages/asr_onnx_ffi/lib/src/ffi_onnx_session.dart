@@ -5,11 +5,11 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:asr_core/asr_core.dart';
+import 'package:fushi_asr_core/asr_core.dart';
 import 'package:ffi/ffi.dart';
 
-import 'package:asr_onnx_ffi/src/ffi/onnxruntime_bindings.dart';
-import 'package:asr_onnx_ffi/src/ort_runtime.dart';
+import 'package:fushi_asr_onnx_ffi/src/ffi/onnxruntime_bindings.dart';
+import 'package:fushi_asr_onnx_ffi/src/ort_runtime.dart';
 
 /// 一次 ORT 会话。
 ///

@@ -2,9 +2,9 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_fbank.dart';
-import 'package:asr_core/src/asr/asr_fbank_workers.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_fbank.dart';
+import 'package:fushi_asr_core/src/asr/asr_fbank_workers.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 Float32List _tone(int samples, int seed) {
   final math.Random rng = math.Random(seed);

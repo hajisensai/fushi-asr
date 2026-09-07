@@ -13,10 +13,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:asr/asr.dart';
+import 'package:fushi_asr/asr.dart';
 import 'package:mime/mime.dart';
 
-import 'package:asr_server/src/web_ui.dart';
+import 'package:fushi_asr_server/src/web_ui.dart';
 
 /// 放弃 multipart 解析后仍愿意读完的请求体余量。把剩余字节读掉是为了让 400 响应
 /// 真的送达（见 `_receiveUpload`）；超过这个余量的请求体不值得继续收。

@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/onnx/onnx_proto.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_proto.dart';
 
 /// `onnx_proto.dart` 的 wire 层与 ONNX 类型化视图：编解码往返、未知字段原样保留、
 /// 嵌套消息按需解码/回写。

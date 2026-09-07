@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
-import 'package:asr_cli/asr_cli.dart';
+import 'package:fushi_asr_cli/asr_cli.dart';
 
 Future<void> main(List<String> args) async {
   try {

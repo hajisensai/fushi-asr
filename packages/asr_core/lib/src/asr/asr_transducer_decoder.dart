@@ -23,15 +23,15 @@ import 'dart:math' as math;
 
 import 'dart:typed_data';
 import 'package:meta/meta.dart';
-import 'package:asr_core/src/asr/asr_encoder_buckets.dart';
-import 'package:asr_core/src/asr/asr_fbank.dart';
-import 'package:asr_core/src/asr/asr_fbank_workers.dart';
-import 'package:asr_core/src/asr/asr_greedy_graph.dart' show AsrGreedyGraphIo;
-import 'package:asr_core/src/asr/asr_model_manifest.dart' show AsrIndexType;
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/asr/asr_transcribe_job.dart'
+import 'package:fushi_asr_core/src/asr/asr_encoder_buckets.dart';
+import 'package:fushi_asr_core/src/asr/asr_fbank.dart';
+import 'package:fushi_asr_core/src/asr/asr_fbank_workers.dart';
+import 'package:fushi_asr_core/src/asr/asr_greedy_graph.dart' show AsrGreedyGraphIo;
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart' show AsrIndexType;
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_job.dart'
     show AsrBatchDecoder, AsrBatchShaper, AsrPipelinedDecoder, AsrSegmentDecoder;
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 /// 解码器累计的分阶段耗时与帧数（诊断用，进度 UI / 集成测试打印）。
 ///

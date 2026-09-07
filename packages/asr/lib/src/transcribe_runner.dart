@@ -1,6 +1,6 @@
 /// 本机转录的装配与执行：CLI 与服务端共用这一层。
 ///
-/// 存在的理由：`asr transcribe` 和 `POST /v1/transcribe` 要做的事逐字相同——装配
+/// 存在的理由：`fushi-subs transcribe` 和 `POST /v1/transcribe` 要做的事逐字相同——装配
 /// 注册表、开服务、按需下模型、跑、把 SRT 转成请求的格式。两处各写一遍必然漂移。
 library;
 
@@ -8,10 +8,10 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:asr_core/asr_core.dart';
-import 'package:asr_onnx_ffi/asr_onnx_ffi.dart';
+import 'package:fushi_asr_core/asr_core.dart';
+import 'package:fushi_asr_onnx_ffi/asr_onnx_ffi.dart';
 
-import 'package:asr/src/subtitle_format.dart';
+import 'package:fushi_asr/src/subtitle_format.dart';
 import 'cancellation.dart';
 
 part 'coreml_worker.dart';
@@ -226,7 +226,7 @@ class TranscribeRunner implements TranscribeService {
       if (missingModel == MissingModelPolicy.fail) {
         throw StateError(
           '${language.tag} 的模型还没下全（还差 ${_mb(plan.bytesToDownload)}）；'
-          '先跑 `asr models pull -l ${language.tag} --variant ${plan.variant.name}`',
+          '先跑 `fushi-subs models pull -l ${language.tag} --variant ${plan.variant.name}`',
         );
       }
       await for (final ModelDownloadEvent e in service.downloadModel(

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:asr_core/asr_core.dart';
-import 'package:asr_onnx_ffi/asr_onnx_ffi.dart';
+import 'package:fushi_asr_core/asr_core.dart';
+import 'package:fushi_asr_onnx_ffi/asr_onnx_ffi.dart';
 import 'package:test/test.dart';
 
 class FakeFactory implements OnnxSessionFactory {

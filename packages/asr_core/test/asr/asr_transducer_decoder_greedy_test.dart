@@ -3,11 +3,11 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 
 import '../support/onnx_factory_probes.dart';
-import 'package:asr_core/src/asr/asr_encoder_buckets.dart';
-import 'package:asr_core/src/asr/asr_greedy_graph.dart' show AsrGreedyGraphIo;
-import 'package:asr_core/src/asr/asr_transducer_decoder.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_encoder_buckets.dart';
+import 'package:fushi_asr_core/src/asr/asr_greedy_graph.dart' show AsrGreedyGraphIo;
+import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 const String _tokensText = '<blk>\t0\nあ\t1\nい\t2\nう\t3\n<unk>\t4\n';
 const int _encDim = 4;

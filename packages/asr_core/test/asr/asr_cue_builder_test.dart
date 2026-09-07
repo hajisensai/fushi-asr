@@ -1,6 +1,6 @@
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_cue_builder.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_cue_builder.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 AsrTranscribedSegment _seg({
   int file = 0,

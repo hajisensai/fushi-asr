@@ -46,7 +46,7 @@ or building an AppKit/SwiftUI application target.
 1. Keep transcription, model management, alignment, and subtitle formatting in
    the existing Dart packages.
 2. Add a macOS host as a separate package/application instead of importing UI
-   concerns into `asr_core`.
+   concerns into `fushi_asr_core`.
 3. For a Flutter macOS host, inject the platform ONNX backend through the
    existing `OnnxSessionFactory` interface and bundle both ONNX Runtime and
    FFmpeg in the application.

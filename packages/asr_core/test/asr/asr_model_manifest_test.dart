@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/onnx/model_file_downloader.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/onnx/model_file_downloader.dart';
 import 'package:path/path.dart' as p;
 
 const String _kJaPrimary =

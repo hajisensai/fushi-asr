@@ -1,4 +1,4 @@
-import 'package:asr_onnx_ffi/src/coreml_specialization.dart';
+import 'package:fushi_asr_onnx_ffi/src/coreml_specialization.dart';
 import 'package:test/test.dart';
 
 void main() {

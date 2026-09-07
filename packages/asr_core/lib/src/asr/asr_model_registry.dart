@@ -22,7 +22,7 @@ import 'dart:io';
 
 import 'package:meta/meta.dart';
 
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
 
 /// 当前生效的注册表。宿主（CLI / 服务端 / app）装配一次，之后
 /// [asrModelPackFor] 与 [AsrLanguage.fromTag] 都读它。

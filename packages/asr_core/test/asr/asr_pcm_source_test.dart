@@ -6,9 +6,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_pcm_source.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/ffmpeg/ffmpeg_backend.dart';
+import 'package:fushi_asr_core/src/asr/asr_pcm_source.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/ffmpeg/ffmpeg_backend.dart';
 
 /// 一次 fake ffmpeg 调用要做的事：往输出文件写 [bytes]（null = 不创建文件），返回
 /// [returnCode] / [output]。

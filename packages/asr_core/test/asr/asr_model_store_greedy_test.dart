@@ -3,8 +3,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/asr/asr_model_store.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_store.dart';
 
 void main() {
   late Directory tmp;

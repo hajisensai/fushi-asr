@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:asr/asr.dart';
+import 'package:fushi_asr/asr.dart';
 
 Future<void> main(List<String> args) async {
   final coreml = args.contains('--coreml');

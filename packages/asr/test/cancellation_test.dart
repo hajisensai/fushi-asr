@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:asr/asr.dart';
+import 'package:fushi_asr/asr.dart';
 import 'package:test/test.dart';
 
 int _expensive() {

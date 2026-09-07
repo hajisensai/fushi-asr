@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:asr/asr.dart';
+import 'package:fushi_asr/asr.dart';
 import 'package:archive/archive.dart';
-import 'package:asr_server/asr_server.dart';
+import 'package:fushi_asr_server/asr_server.dart';
 import 'package:test/test.dart';
 
 /// 假转录器：不碰真模型，只按脚本回报进度与结果。

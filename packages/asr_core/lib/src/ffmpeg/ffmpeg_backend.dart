@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:meta/meta.dart';
 
-import 'package:asr_core/src/util/log.dart';
+import 'package:fushi_asr_core/src/util/log.dart';
 
 
 

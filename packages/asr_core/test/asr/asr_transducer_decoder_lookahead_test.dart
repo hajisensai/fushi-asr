@@ -2,9 +2,9 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_transducer_decoder.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 /// 词表：0=<blk> 1..8 = 字符，9=<unk>。
 const String _tokensText =

@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_fbank.dart';
+import 'package:fushi_asr_core/src/asr/asr_fbank.dart';
 
 /// 黄金数据由 `fixtures/gen_fbank_golden.py`（kaldi-native-fbank 1.22.3，
 /// sherpa-onnx 默认 fbank 选项）生成；本测试断言 Dart 实现与 knf 逐值一致。

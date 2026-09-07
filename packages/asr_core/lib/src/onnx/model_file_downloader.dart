@@ -18,7 +18,7 @@ import 'dart:math' as math;
 
 import 'package:path/path.dart' as p;
 
-import 'package:asr_core/src/util/asr_http.dart';
+import 'package:fushi_asr_core/src/util/asr_http.dart';
 
 /// 清单里一个可下载的模型文件（各子系统的清单类型实现本接口）。
 abstract interface class DownloadableModelFile {

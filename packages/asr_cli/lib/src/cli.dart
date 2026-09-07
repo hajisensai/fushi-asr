@@ -6,13 +6,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
-import 'package:asr/asr.dart';
-import 'package:asr_server/asr_server.dart';
+import 'package:fushi_asr/asr.dart';
+import 'package:fushi_asr_server/asr_server.dart';
 
 /// 建命令行。
 CommandRunner<int> buildAsrCommandRunner() {
   final CommandRunner<int> runner = CommandRunner<int>(
-    'asr',
+    'fushi-subs',
     '多语言语音识别生成字幕。',
   )
     ..addCommand(TranscribeCommand())
@@ -79,7 +79,7 @@ class TranscribeCommand extends Command<int> {
   String get description => '把音视频转成字幕。';
 
   @override
-  String get invocation => 'asr transcribe [选项] <音视频文件...>';
+  String get invocation => 'fushi-subs transcribe [选项] <音视频文件...>';
 
   @override
   Future<int> run() async {
@@ -151,7 +151,7 @@ class TranscribeCommand extends Command<int> {
 
     final String? out = argResults!['output'] as String?;
     if (out == null) {
-      // 字幕走 stdout，日志与进度一律走 stderr —— 这样 `asr transcribe … > a.srt`
+      // 字幕走 stdout，日志与进度一律走 stderr —— 这样 `fushi-subs transcribe … > a.srt`
       // 拿到的是干净的字幕。
       stdout.write(text);
     } else {

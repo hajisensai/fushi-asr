@@ -1,6 +1,6 @@
 /// asr 服务端的客户端。
 ///
-/// `asr transcribe --server http://host:port` 走它。
+/// `fushi-subs transcribe --server http://host:port` 走它。
 library;
 
 import 'dart:async';

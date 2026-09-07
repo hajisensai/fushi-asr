@@ -1,9 +1,9 @@
 import 'dart:io';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/asr/asr_model_store.dart';
-import 'package:asr_core/src/onnx/model_file_downloader.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_store.dart';
+import 'package:fushi_asr_core/src/onnx/model_file_downloader.dart';
 import 'package:path/path.dart' as p;
 
 /// 记录调用并把缺失文件写成 3 字节小文件的 fake 下载器。

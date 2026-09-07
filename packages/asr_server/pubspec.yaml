@@ -1,5 +1,5 @@
-name: asr_server
-description: HTTP server and client for asr, with a built-in minimal web UI.
+name: fushi_asr_server
+description: HTTP server and client for fushi_asr, with a built-in minimal web UI.
 version: 0.1.0
 publish_to: none
 resolution: workspace
@@ -8,7 +8,7 @@ environment:
   sdk: ">=3.6.0 <4.0.0"
 
 dependencies:
-  asr: ^0.1.0
+  fushi_asr: ^0.1.0
   mime: ^2.0.0
 
 dev_dependencies:
