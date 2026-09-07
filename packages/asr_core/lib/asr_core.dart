@@ -18,6 +18,7 @@ export 'src/asr/asr_fbank_workers.dart';
 export 'src/asr/asr_fp16_graph.dart';
 export 'src/asr/asr_greedy_graph.dart';
 export 'src/asr/asr_model_manifest.dart';
+export 'src/asr/asr_model_registry.dart';
 export 'src/asr/asr_model_store.dart';
 export 'src/asr/asr_pcm_bridge.dart';
 export 'src/asr/asr_pcm_source.dart';

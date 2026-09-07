@@ -60,8 +60,12 @@
 /// `asr_model_store.dart`。
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:meta/meta.dart';
+
+import 'package:asr_core/src/asr/asr_model_registry.dart';
 import 'package:asr_core/src/onnx/model_file_downloader.dart';
 
 /// 转录语言。持久化用 [AsrLanguage.tag]（BCP-47 主子标签；粤语用 ISO 639-3
@@ -69,27 +73,14 @@ import 'package:asr_core/src/onnx/model_file_downloader.dart';
 ///
 /// [nativeName] 是该语言母语者认得的名字，转录弹层下拉与设置页模型行直接显示它
 /// （与界面语言选择器同一惯例，`FushiLocalisations.localeNames`），不走 i18n。
-enum AsrLanguage {
-  japanese('ja', '日本語'),
-  english('en', 'English'),
-  mandarin('zh', '中文（普通话）'),
-  cantonese('yue', '粵語'),
-  korean('ko', '한국어'),
-  russian('ru', 'Русский'),
-  vietnamese('vi', 'Tiếng Việt'),
-  thai('th', 'ไทย'),
-  // 以下 9 种走 Omnilingual CTC 包（[kAsrOmnilingualPack]），与界面语言表
-  // （`FushiLocalisations.localeNames`）一一对应。
-  german('de', 'Deutsch'),
-  spanish('es', 'Español'),
-  french('fr', 'Français'),
-  italian('it', 'Italiano'),
-  dutch('nl', 'Nederlands'),
-  portuguese('pt', 'Português'),
-  turkish('tr', 'Türkçe'),
-  indonesian('id', 'Bahasa Indonesia'),
-  arabic('ar', 'العربية');
-
+///
+/// **不是 enum**：用户可以自带模型包（`AsrModelRegistry`），而自带包的语言未必在
+/// 我们内置的 17 种里。封闭枚举会逼出一个 `AsrLanguage.custom` 特例分支——那是
+/// 数据结构错了。这里是个带 [tag] 的值类型，内置 17 种是 static const 实例，
+/// 用法（`AsrLanguage.japanese` / `AsrLanguage.values` / `==`）与 enum 时期逐字
+/// 相同，自带包的语言只是多几个实例。
+@immutable
+class AsrLanguage {
   const AsrLanguage(this.tag, this.nativeName);
 
   /// 语言标签（`ja` / `en` / `zh` / `yue` …），偏好与任务目录用它。
@@ -98,13 +89,58 @@ enum AsrLanguage {
   /// 母语写法的语言名。
   final String nativeName;
 
-  /// 由标签反查；不认识的标签返回 null（调用方自己定兜底）。
+  static const AsrLanguage japanese = AsrLanguage('ja', '日本語');
+  static const AsrLanguage english = AsrLanguage('en', 'English');
+  static const AsrLanguage mandarin = AsrLanguage('zh', '中文（普通话）');
+  static const AsrLanguage cantonese = AsrLanguage('yue', '粵語');
+  static const AsrLanguage korean = AsrLanguage('ko', '한국어');
+  static const AsrLanguage russian = AsrLanguage('ru', 'Русский');
+  static const AsrLanguage vietnamese = AsrLanguage('vi', 'Tiếng Việt');
+  static const AsrLanguage thai = AsrLanguage('th', 'ไทย');
+  // 以下 9 种走 Omnilingual CTC 包（[kAsrOmnilingualPack]）。
+  static const AsrLanguage german = AsrLanguage('de', 'Deutsch');
+  static const AsrLanguage spanish = AsrLanguage('es', 'Español');
+  static const AsrLanguage french = AsrLanguage('fr', 'Français');
+  static const AsrLanguage italian = AsrLanguage('it', 'Italiano');
+  static const AsrLanguage dutch = AsrLanguage('nl', 'Nederlands');
+  static const AsrLanguage portuguese = AsrLanguage('pt', 'Português');
+  static const AsrLanguage turkish = AsrLanguage('tr', 'Türkçe');
+  static const AsrLanguage indonesian = AsrLanguage('id', 'Bahasa Indonesia');
+  static const AsrLanguage arabic = AsrLanguage('ar', 'العربية');
+
+  /// 内置的 17 种（顺序即 UI 展示顺序：8 个 transducer 包在前，9 个
+  /// Omnilingual 语言在后）。**不含**用户自带包的语言，那些看 [registered]。
+  static const List<AsrLanguage> values = <AsrLanguage>[
+    japanese, english, mandarin, cantonese, korean, russian, vietnamese, thai,
+    german, spanish, french, italian, dutch, portuguese, turkish, indonesian,
+    arabic,
+  ];
+
+  /// 当前注册表（内置 + 用户清单）认得的全部语言。
+  static List<AsrLanguage> get registered => asrModelRegistry.languages;
+
+  /// 由标签反查**当前注册表里**的语言；不认识的标签返回 null（调用方自己定兜底）。
+  ///
+  /// 判据是注册表而不是 [values]：自带包注册进来的语言也该能按标签选中。没有装
+  /// 用户清单时结果与内置 17 种逐字相同。
   static AsrLanguage? fromTag(String? tag) {
-    for (final AsrLanguage l in values) {
+    if (tag == null) return null;
+    for (final AsrLanguage l in registered) {
       if (l.tag == tag) return l;
     }
     return null;
   }
+
+  /// 相等即标签相等：同一个标签的语言就是同一种语言，不管 [nativeName] 写法。
+  @override
+  bool operator ==(Object other) =>
+      other is AsrLanguage && other.tag == tag;
+
+  @override
+  int get hashCode => tag.hashCode;
+
+  @override
+  String toString() => 'AsrLanguage($tag)';
 
   /// 由书的语言标签（EPUB `dc:language`，如 `ja-JP` / `en_GB` / `EN` / `zh-Hant-HK`）
   /// 推转录语言：先看整串是否指向粤语（`yue` 主子标签、或 `zh` 带 `HK` / `MO` /
@@ -189,6 +225,25 @@ class AsrModelFile implements DownloadableModelFile {
 
   /// 第二源直链（同一 blob 的其他托管处）；主源及其 hf-mirror 全失败后按序尝试。
   final List<String> mirrorUrls;
+
+  Object toJson() => <String, Object?>{
+        'fileName': fileName,
+        'url': url,
+        'expectedBytes': expectedBytes,
+        'role': role.name,
+        if (mirrorUrls.isNotEmpty) 'mirrorUrls': mirrorUrls,
+      };
+
+  factory AsrModelFile.fromJson(Object? json) {
+    final Map<String, Object?> m = _asMap(json, 'model file');
+    return AsrModelFile(
+      fileName: _asString(m, 'fileName'),
+      url: _asString(m, 'url'),
+      expectedBytes: _asInt(m, 'expectedBytes'),
+      role: _asEnum(m, 'role', AsrModelRole.values, (AsrModelRole v) => v.name),
+      mirrorUrls: _asStringList(m, 'mirrorUrls'),
+    );
+  }
 }
 
 /// 一种语言的整套模型文件（两个编码器变体的并集 + 共用 tokens / vad）。
@@ -277,6 +332,137 @@ class AsrModelPack {
       variant,
     ).fold<int>(0, (int acc, AsrModelFile file) => acc + file.expectedBytes);
   }
+
+  Object toJson() => <String, Object?>{
+        'id': id,
+        'displayName': displayName,
+        'sourceUrl': sourceUrl,
+        'architecture': architecture.name,
+        'indexType': indexType.name,
+        'decoderContextSize': decoderContextSize,
+        'blankToken': blankToken,
+        if (fp32GpuMinBudgetBytes != null)
+          'fp32GpuMinBudgetBytes': fp32GpuMinBudgetBytes,
+        'languages': <Object>[
+          for (final AsrLanguage l in languages)
+            <String, String>{'tag': l.tag, 'nativeName': l.nativeName},
+        ],
+        'files': <Object>[for (final AsrModelFile f in files) f.toJson()],
+      };
+
+  /// 从清单 JSON 建一个包。
+  ///
+  /// 缺省值刻意跟着**内置包最常见的形态**走，让自带一个普通 zipformer RNN-T 包
+  /// 只需要写 id / languages / files：`architecture` 默认 transducer、
+  /// `indexType` 默认 int64、`decoderContextSize` 默认 2、`blankToken` 默认
+  /// `<blk>`。CTC 包必须显式写 `architecture` 与 `blankToken`——它们没有共识默认
+  /// 值（Omnilingual 的 blank 是 `<s>`，猜错就是整篇乱码）。
+  factory AsrModelPack.fromJson(Object? json) {
+    final Map<String, Object?> m = _asMap(json, 'model pack');
+    final String id = _asString(m, 'id');
+    try {
+      final Object? langs = m['languages'];
+      if (langs is! List || langs.isEmpty) {
+        throw const FormatException('languages 必须是非空数组');
+      }
+      final AsrModelArchitecture architecture = m.containsKey('architecture')
+          ? _asEnum(m, 'architecture', AsrModelArchitecture.values,
+              (AsrModelArchitecture v) => v.name)
+          : AsrModelArchitecture.transducer;
+      if (architecture == AsrModelArchitecture.ctc &&
+          !m.containsKey('blankToken')) {
+        throw const FormatException(
+          'CTC 包必须显式写 blankToken（没有共识默认值，猜错整篇乱码）',
+        );
+      }
+      final Object? files = m['files'];
+      if (files is! List || files.isEmpty) {
+        throw const FormatException('files 必须是非空数组');
+      }
+      return AsrModelPack(
+        id: id,
+        displayName:
+            m.containsKey('displayName') ? _asString(m, 'displayName') : id,
+        sourceUrl: m.containsKey('sourceUrl') ? _asString(m, 'sourceUrl') : '',
+        architecture: architecture,
+        indexType: m.containsKey('indexType')
+            ? _asEnum(m, 'indexType', AsrIndexType.values,
+                (AsrIndexType v) => v.name)
+            : AsrIndexType.int64,
+        decoderContextSize: m.containsKey('decoderContextSize')
+            ? _asInt(m, 'decoderContextSize')
+            : 2,
+        blankToken:
+            m.containsKey('blankToken') ? _asString(m, 'blankToken') : '<blk>',
+        fp32GpuMinBudgetBytes: m['fp32GpuMinBudgetBytes'] == null
+            ? null
+            : _asInt(m, 'fp32GpuMinBudgetBytes'),
+        languages: <AsrLanguage>[
+          for (final Object? l in langs) _languageFromJson(l),
+        ],
+        files: <AsrModelFile>[
+          for (final Object? f in files) AsrModelFile.fromJson(f),
+        ],
+      );
+    } on FormatException catch (error) {
+      throw FormatException('模型包 "$id"：${error.message}');
+    }
+  }
+}
+
+AsrLanguage _languageFromJson(Object? json) {
+  // 只给标签的短写法（`"ja"`）也认：自带包最常见的形态是复用已知语言。
+  if (json is String) {
+    return AsrLanguage.fromTag(json) ?? AsrLanguage(json, json);
+  }
+  final Map<String, Object?> m = _asMap(json, 'language');
+  final String tag = _asString(m, 'tag');
+  return AsrLanguage(
+    tag,
+    m.containsKey('nativeName') ? _asString(m, 'nativeName') : tag,
+  );
+}
+
+Map<String, Object?> _asMap(Object? json, String what) {
+  if (json is Map<String, Object?>) return json;
+  throw FormatException('$what 必须是对象，实得 ${json.runtimeType}');
+}
+
+String _asString(Map<String, Object?> m, String key) {
+  final Object? v = m[key];
+  if (v is String && v.isNotEmpty) return v;
+  throw FormatException('字段 $key 必须是非空字符串');
+}
+
+int _asInt(Map<String, Object?> m, String key) {
+  final Object? v = m[key];
+  if (v is int) return v;
+  throw FormatException('字段 $key 必须是整数');
+}
+
+List<String> _asStringList(Map<String, Object?> m, String key) {
+  final Object? v = m[key];
+  if (v == null) return const <String>[];
+  if (v is! List) throw FormatException('字段 $key 必须是数组');
+  return <String>[
+    for (final Object? e in v)
+      if (e is String) e else throw FormatException('$key 的元素必须是字符串'),
+  ];
+}
+
+T _asEnum<T>(
+  Map<String, Object?> m,
+  String key,
+  List<T> values,
+  String Function(T) nameOf,
+) {
+  final Object? v = m[key];
+  for (final T candidate in values) {
+    if (nameOf(candidate) == v) return candidate;
+  }
+  throw FormatException(
+    '字段 $key 必须是 ${values.map(nameOf).join(" / ")} 之一，实得 $v',
+  );
 }
 
 const AsrModelFile kAsrVadFile = AsrModelFile(
@@ -854,11 +1040,20 @@ const List<AsrModelPack> kAsrModelPacks = <AsrModelPack>[
   kAsrOmnilingualPack,
 ];
 
-/// 某语言的模型包（每种 [AsrLanguage] 恰有一个包服务它，见清单测试）。
+/// 某语言的模型包。
+///
+/// 查的是**当前注册表**（[asrModelRegistry]）而不是内置常量表——自带模型包就是
+/// 从这里进来的。没装用户清单时结果与内置表逐字相同（每种内置 [AsrLanguage] 恰
+/// 有一个包服务它，见清单测试）。
 AsrModelPack asrModelPackFor(AsrLanguage language) {
-  return kAsrModelPacks.firstWhere(
-    (AsrModelPack pack) => pack.languages.contains(language),
-  );
+  final AsrModelPack? pack = asrModelRegistry.packForLanguage(language);
+  if (pack == null) {
+    throw StateError(
+      '当前模型注册表里没有服务 ${language.tag} 的包；'
+      '内置 17 语言之外的语言需要用 --models 提供清单',
+    );
+  }
+  return pack;
 }
 
 AsrModelRole asrCtcModelRole(AsrEncoderVariant variant) => switch (variant) {
