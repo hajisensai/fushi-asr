@@ -166,6 +166,33 @@ void main() {
     expect(state.isFileDone(1), isTrue);
   });
 
+  test('cancel skips pending half-batches but preserves a safe checkpoint',
+      () async {
+    final decoder = _FakeDecoder();
+    final job = AsrTranscribeJob(
+        jobDir: tmp,
+        audioPaths: ['a.mp3'],
+        modelId: _kModelId,
+        pcm: _FakePcm({'a.mp3': 15000}),
+        segmenter: _FakeSegmenter(),
+        decoder: decoder,
+        batchSize: 8,
+        chunkSeconds: 5,
+        progressInterval: Duration.zero);
+    final events = <AsrTranscribeEvent>[];
+    await for (final event in job.run()) {
+      events.add(event);
+      if (event is AsrTranscribeProgressEvent)
+        job.requestPause(discardPending: true);
+    }
+    expect(events.last, isA<AsrTranscribePausedEvent>());
+    expect(decoder.batchSizes, isEmpty);
+    final state =
+        await AsrTranscribeJob.loadState(tmp, ['a.mp3'], modelId: _kModelId);
+    expect(state.finished, false);
+    expect(state.resumeSamples.single, 0);
+  });
+
   test('暂停后从检查点续跑：不重复段落，恢复点取进行中语音起点', () async {
     final List<String> paths = <String>['a.mp3'];
     final _FakePcm pcm = _FakePcm(<String, int>{'a.mp3': 15000});

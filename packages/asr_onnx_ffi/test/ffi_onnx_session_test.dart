@@ -173,6 +173,42 @@ void main() {
           reason: 'CPU 不算加速 EP');
     });
 
+    test('CoreML FP32 output matches CPU across inputs and repeated runs',
+        () async {
+      if (!Platform.isMacOS ||
+          !(await factory.availableAcceleratedProviders())
+              .contains(OnnxExecutionProvider.coreml)) {
+        markTestSkipped('macOS CoreML runtime required');
+        return;
+      }
+      const path = 'test/fixtures/greedy_tiny_joiner.onnx';
+      final baseline = await factory.createSession(path, providers: cpu);
+      addTearDown(baseline.close);
+      OnnxProviderResolution? resolution;
+      final accelerated = await factory.createSession(path,
+          providers: [OnnxExecutionProvider.coreml],
+          onProviderResolved: (value) => resolution = value,
+          freeDimensionOverrides: {'N': 1});
+      addTearDown(accelerated.close);
+      expect(resolution!.effective, OnnxExecutionProvider.coreml);
+      for (final scale in [0.0, 0.5, -1.0]) {
+        final inputs = {
+          'encoder_out': OnnxTensor.float32(
+              Float32List.fromList([scale, scale * 2, scale * 3, scale * 4]),
+              [1, 4]),
+          'decoder_out': OnnxTensor.float32(
+              Float32List.fromList([0.1, 0.2, -0.3, 0.4]), [1, 4]),
+        };
+        final expected = (await baseline.run(inputs))['logit']!;
+        final actual = (await accelerated.run(inputs))['logit']!;
+        expect(actual.shape, expected.shape);
+        expect(actual.floatData!.every((v) => v.isFinite), isTrue);
+        for (var i = 0; i < expected.elementCount; i++) {
+          expect(actual.floatData![i], closeTo(expected.floatData![i], 0.005));
+        }
+      }
+    });
+
     test('显存预算按未知（null）处理，不冒充 0', () async {
       expect(await factory.deviceMemoryBudgetBytes(), isNull);
     });

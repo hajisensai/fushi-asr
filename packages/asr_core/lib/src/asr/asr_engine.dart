@@ -24,8 +24,8 @@ import 'package:asr_core/src/onnx/onnx_inference.dart';
 /// `kOnnxLogName`）。
 export 'package:asr_core/src/asr/asr_types.dart' show kAsrLogName;
 
-/// 用户对加速的偏好：自动（按平台策略挑 GPU EP）或强制 CPU。
-enum AsrAccelerationPreference { auto, cpuOnly }
+/// 加速偏好：自动、CPU，或显式选择 macOS FP32 CoreML。
+enum AsrAccelerationPreference { auto, cpuOnly, coreml }
 
 /// 平台（纯枚举入参，保持策略函数可测纯函数）。
 enum AsrPlatform { windows, macos, ios, linux, android }
@@ -65,10 +65,9 @@ AsrPlatform currentAsrPlatform() {
 ///   fp32 检测器那 19.4 倍加速的形态。CUDA 在我们出的 ORT NuGet 里不存在
 ///   （`microsoft.ml.onnxruntime.directml`，见 `ocr_inference.dart`），但若
 ///   available 集合里真有它——将来换了带 CUDA EP 的包——就优先于 DirectML。
-/// - **macOS / iOS：默认不启用 CoreML，返回 CPU**。BUG-1613：CoreML 对 int8
-///   检测器在 iOS 上静默算出空结果、不抛异常不触发回退，可观测性照不到；对
-///   fp32 编码器**未实测**。没有真机数据前不开——要开先在真机上拿数
-///   （`recommendAsrEncoderVariant` 因此在 Apple 上恒推荐 int8）。
+/// - **macOS：auto 仍推荐 INT8 CPU；coreml 显式请求 FP32 CoreML**。
+///   M4 日语实测动态图分成 263 个 CoreML 子图，整段速度慢于 INT8 CPU，
+///   因此不把实验后端作为自动默认。iOS 尚未验证，仍保持 CPU。
 /// - Linux / Android：CPU。
 /// - [AsrAccelerationPreference.cpuOnly] 恒 CPU。
 /// - 任何加速 EP 后面永远缀 CPU 兜底：运行期建不出会话由
@@ -84,16 +83,25 @@ List<OnnxExecutionProvider> selectAsrEncoderProviders({
   ];
   if (preference == AsrAccelerationPreference.cpuOnly) return cpuOnly;
   if (variant != AsrEncoderVariant.fp32) return cpuOnly;
+  if (preference == AsrAccelerationPreference.coreml) {
+    if (platform != AsrPlatform.macos ||
+        !available.contains(OnnxExecutionProvider.coreml)) {
+      throw UnsupportedError(
+          'Requested CoreML is unavailable on this platform/runtime');
+    }
+    return const [OnnxExecutionProvider.coreml, OnnxExecutionProvider.cpu];
+  }
   final List<OnnxExecutionProvider> preferenceOrder = switch (platform) {
     AsrPlatform.windows => const <OnnxExecutionProvider>[
-      OnnxExecutionProvider.cuda,
-      OnnxExecutionProvider.directml,
-    ],
-    // BUG-1613：CoreML 待真机拿数后再开。
+        OnnxExecutionProvider.cuda,
+        OnnxExecutionProvider.directml,
+      ],
+    // 自动模式保留 CPU；macOS CoreML 由上面的显式分支选择。
     AsrPlatform.macos ||
     AsrPlatform.ios ||
     AsrPlatform.linux ||
-    AsrPlatform.android => const <OnnxExecutionProvider>[],
+    AsrPlatform.android =>
+      const <OnnxExecutionProvider>[],
   };
   for (final OnnxExecutionProvider candidate in preferenceOrder) {
     if (!available.contains(candidate)) continue;

@@ -6,11 +6,15 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:asr_core/asr_core.dart';
 import 'package:asr_onnx_ffi/asr_onnx_ffi.dart';
 
 import 'package:asr/src/subtitle_format.dart';
+import 'cancellation.dart';
+
+part 'coreml_worker.dart';
 
 /// 一次转录的进度回报。
 class TranscribeProgress {
@@ -43,7 +47,10 @@ class TranscribeOutcome {
   const TranscribeOutcome({
     required this.text,
     required this.cues,
-    required this.provider,
+    this.provider,
+    this.engine = 'reazonspeech',
+    this.tokenTimings,
+    this.decodeStats,
     required this.elapsed,
     required this.audioMs,
   });
@@ -53,7 +60,15 @@ class TranscribeOutcome {
   final List<SubtitleCue> cues;
 
   /// 编码器真正落到的 EP（含降级后的结果）。
-  final OnnxProviderResolution provider;
+  final OnnxProviderResolution? provider;
+
+  /// Native engines do not have an ONNX execution provider.
+  final String engine;
+  final List<AsrCueTokenTiming>? tokenTimings;
+
+  /// Diagnostic elapsed timings; asynchronous stages may overlap.
+  final AsrDecodeStats? decodeStats;
+  String get providerLabel => provider?.effective.name ?? engine;
   final Duration elapsed;
   final int audioMs;
 }
@@ -78,6 +93,7 @@ abstract interface class TranscribeService {
     required AsrLanguage language,
     SubtitleFormat format,
     void Function(TranscribeProgress progress)? onProgress,
+    TranscribeCancellation? cancellation,
   });
 }
 
@@ -87,6 +103,8 @@ class TranscribeRunner implements TranscribeService {
     required this.registry,
     this.dataRoot,
     this.forceCpu = false,
+    this.forceCoreMl = false,
+    this.reuseCoreMlSessions = true,
     this.missingModel = MissingModelPolicy.download,
   });
 
@@ -96,7 +114,25 @@ class TranscribeRunner implements TranscribeService {
   final Directory? dataRoot;
 
   final bool forceCpu;
+
+  /// Experimental macOS FP32 encoder backend; see MACOS_COREML.md benchmarks.
+  final bool forceCoreMl;
+
+  /// macOS only. Keep sessions in an isolated, serial worker until [close].
+  final bool reuseCoreMlSessions;
   final MissingModelPolicy missingModel;
+  Future<_CoreMlWorker>? _worker;
+  bool _closed = false;
+  Future<void>? _closing;
+
+  /// Stop accepting work, drain queued CoreML jobs, and release native models.
+  Future<void> close() => _closing ??= _close();
+
+  Future<void> _close() async {
+    _closed = true;
+    final worker = _worker;
+    if (worker != null) await (await worker).close();
+  }
 
   /// 转录 [audioPaths]，把字幕按 [format] 渲染出来。
   ///
@@ -107,6 +143,33 @@ class TranscribeRunner implements TranscribeService {
     required AsrLanguage language,
     SubtitleFormat format = SubtitleFormat.srt,
     void Function(TranscribeProgress progress)? onProgress,
+    TranscribeCancellation? cancellation,
+  }) async {
+    cancellation?.throwIfCancelled();
+    if (_closed) throw StateError('TranscribeRunner is closed');
+    if (forceCpu && forceCoreMl) {
+      throw ArgumentError('CPU and CoreML cannot both be requested');
+    }
+    if (forceCoreMl && reuseCoreMlSessions && Platform.isMacOS) {
+      final worker = await (_worker ??=
+          _CoreMlWorker.spawn(registry, dataRoot, missingModel));
+      return worker.run(audioPaths, language, format, onProgress, cancellation);
+    }
+    return _run(
+        audioPaths: audioPaths,
+        language: language,
+        format: format,
+        onProgress: onProgress,
+        cancellation: cancellation);
+  }
+
+  Future<TranscribeOutcome> _run({
+    required List<String> audioPaths,
+    required AsrLanguage language,
+    required SubtitleFormat format,
+    void Function(TranscribeProgress progress)? onProgress,
+    OnnxSessionFactory? sessionFactory,
+    TranscribeCancellation? cancellation,
   }) async {
     asrModelRegistry = registry;
     final Directory? root = dataRoot;
@@ -121,15 +184,33 @@ class TranscribeRunner implements TranscribeService {
 
     final AsrTranscriptionService service = AsrTranscriptionService(
       backend: const AsrIsolateBackend(buildFactory: buildFfiOnnxFactory),
+      loader: sessionFactory == null
+          ? null
+          : AsrEngineLoader(factory: sessionFactory),
+      runInIsolate: sessionFactory == null,
+      greedySessions: _macOsSetting('ASR_MACOS_GREEDY_SESSIONS'),
+      greedyIntraOpThreads: _macOsSetting('ASR_MACOS_GREEDY_THREADS'),
+      batchSize: _macOsSetting('ASR_MACOS_BATCH_SIZE'),
+      // CPU/INT8 checkpoints must not satisfy an explicit FP32/CoreML run.
+      jobsRoot: forceCoreMl
+          ? () async => Directory(
+              '${(await asrSupportRootDirectory()).path}/asr_jobs/coreml-fp32')
+          : null,
     );
-    final AsrAccelerationPreference preference = forceCpu
-        ? AsrAccelerationPreference.cpuOnly
-        : AsrAccelerationPreference.auto;
+    final AsrAccelerationPreference preference = forceCoreMl
+        ? AsrAccelerationPreference.coreml
+        : forceCpu
+            ? AsrAccelerationPreference.cpuOnly
+            : AsrAccelerationPreference.auto;
 
     final AsrTranscribePlan plan = await service.plan(
       language: language,
       preference: preference,
     );
+    if (forceCoreMl && plan.variant != AsrEncoderVariant.fp32) {
+      throw StateError(
+          'CoreML requires FP32, but this model exceeds the configured GPU memory budget');
+    }
     final String? probeError = plan.probeError;
     if (probeError != null) {
       // EP 探测失败是一条真实的降级路径（有 GPU 也会退成 CPU）。不吞：整本转录
@@ -140,17 +221,19 @@ class TranscribeRunner implements TranscribeService {
       ));
     }
 
+    cancellation?.throwIfCancelled();
     if (!plan.modelReady) {
       if (missingModel == MissingModelPolicy.fail) {
         throw StateError(
           '${language.tag} 的模型还没下全（还差 ${_mb(plan.bytesToDownload)}）；'
-          '先跑 `asr models pull -l ${language.tag}`',
+          '先跑 `asr models pull -l ${language.tag} --variant ${plan.variant.name}`',
         );
       }
       await for (final ModelDownloadEvent e in service.downloadModel(
         language: language,
         variant: plan.variant,
       )) {
+        cancellation?.throwIfCancelled();
         onProgress?.call(TranscribeProgress(
           phase: 'download',
           processedMs: e.receivedBytes,
@@ -168,22 +251,36 @@ class TranscribeRunner implements TranscribeService {
       variant: plan.variant,
       preference: preference,
     );
+    final detach =
+        cancellation?.listen(() => running.requestPause(discardPending: true));
     try {
+      cancellation?.throwIfCancelled();
+      // Model construction has completed. Start the frontend's ASR clock now,
+      // not at the first chunk-complete event (which may be minutes of audio).
+      onProgress?.call(const TranscribeProgress(
+        phase: 'transcribe',
+        detail: '模型已就绪；按音频块回报进度，首块完成前剩余时间待估算',
+      ));
       AsrTranscribeResult? finished;
       await for (final AsrTranscribeEvent event in running.run()) {
         switch (event) {
-          case AsrTranscribeProgressEvent(:final AsrTranscribeProgress progress):
+          case AsrTranscribeProgressEvent(
+              :final AsrTranscribeProgress progress
+            ):
+            if (cancellation?.isCancelled == true) continue;
             onProgress?.call(TranscribeProgress(
               phase: 'transcribe',
               processedMs: progress.processedMs,
               totalMs: progress.totalMs,
             ));
           case AsrTranscribePausedEvent():
+            cancellation?.throwIfCancelled();
             throw StateError('转录被暂停 —— 非交互运行下不该发生');
           case AsrTranscribeFinishedEvent(:final AsrTranscribeResult result):
             finished = result;
         }
       }
+      cancellation?.throwIfCancelled();
       watch.stop();
       if (finished == null) {
         throw StateError('转录结束但没有产出结果');
@@ -198,18 +295,38 @@ class TranscribeRunner implements TranscribeService {
       return TranscribeOutcome(
         // srt 直接用产物原文，不经解析再渲染一遍：那样会把核心写出来的东西
         // 换成我们的渲染结果，出了差异很难说清是谁的。
-        text: format == SubtitleFormat.srt ? srt : renderSubtitles(cues, format),
+        text:
+            format == SubtitleFormat.srt ? srt : renderSubtitles(cues, format),
         cues: cues,
+        tokenTimings: await AsrTranscriptionService.readCueTokenTimings(
+            finished.srtPath,
+            expectedCount: cues.length),
         provider: running.encoderResolution,
+        decodeStats: running.decodeStats,
         elapsed: watch.elapsed,
         audioMs: finished.totalMs,
       );
     } finally {
+      detach?.call();
       asrShutdownTrace('runner: dispose start');
       await running.dispose();
+      if (cancellation?.isCancelled == true) {
+        await service.discard(audioPaths, language);
+      }
       asrShutdownTrace('runner: dispose done');
     }
   }
 }
 
 String _mb(int bytes) => '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+
+int? _macOsSetting(String name) {
+  if (!Platform.isMacOS) return null;
+  final raw = Platform.environment[name];
+  if (raw == null) return null;
+  final value = int.tryParse(raw);
+  if (value == null || value < 1 || value > 64) {
+    throw ArgumentError('$name must be 1..64');
+  }
+  return value;
+}

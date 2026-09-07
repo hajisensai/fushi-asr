@@ -66,10 +66,9 @@ class TranscribeCommand extends Command<int> {
           allowed: <String>['srt', 'vtt', 'json'],
           help: '字幕格式')
       ..addFlag('cpu', help: '强制 CPU（不试 GPU EP）', negatable: false)
-      ..addFlag('no-download',
-          help: '缺模型时报错而不是自动下载', negatable: false)
-      ..addOption('server',
-          help: '把活交给远端 asr 服务端（http://host:port），本机不跑推理')
+      ..addFlag('coreml', help: '使用 macOS CoreML（FP32 模型）', negatable: false)
+      ..addFlag('no-download', help: '缺模型时报错而不是自动下载', negatable: false)
+      ..addOption('server', help: '把活交给远端 asr 服务端（http://host:port），本机不跑推理')
       ..addFlag('quiet', abbr: 'q', help: '不打进度', negatable: false);
   }
 
@@ -85,6 +84,9 @@ class TranscribeCommand extends Command<int> {
   @override
   Future<int> run() async {
     final List<String> paths = argResults!.rest;
+    if (argResults!['cpu'] as bool && argResults!['coreml'] as bool) {
+      usageException('--cpu 与 --coreml 不能同时使用');
+    }
     if (paths.isEmpty) {
       usageException('至少要给一个音视频文件');
     }
@@ -121,16 +123,22 @@ class TranscribeCommand extends Command<int> {
         registry: ctx.registry,
         dataRoot: ctx.dataRoot,
         forceCpu: argResults!['cpu'] as bool,
+        forceCoreMl: argResults!['coreml'] as bool,
         missingModel: argResults!['no-download'] as bool
             ? MissingModelPolicy.fail
             : MissingModelPolicy.download,
       );
-      final TranscribeOutcome outcome = await runner.run(
-        audioPaths: paths,
-        language: language,
-        format: format,
-        onProgress: quiet ? null : _printProgress,
-      );
+      final TranscribeOutcome outcome;
+      try {
+        outcome = await runner.run(
+          audioPaths: paths,
+          language: language,
+          format: format,
+          onProgress: quiet ? null : _printProgress,
+        );
+      } finally {
+        await runner.close();
+      }
       if (!quiet) {
         stderr.writeln();
         stderr.writeln('完成：${outcome.cues.length} 条 cue，'
@@ -337,9 +345,9 @@ class ServeCommand extends Command<int> {
       ..addOption('token',
           help: '接口令牌（请求带 Authorization: Bearer <token>）；省略则不鉴权')
       ..addFlag('cpu', help: '强制 CPU', negatable: false)
+      ..addFlag('coreml', help: '使用 macOS CoreML（FP32 模型）', negatable: false)
       ..addOption('concurrency',
-          defaultsTo: '1',
-          help: '同时跑几个转录任务。**默认 1**：GPU 会话并发建很容易把显存撑爆');
+          defaultsTo: '1', help: '同时跑几个转录任务。**默认 1**：GPU 会话并发建很容易把显存撑爆');
   }
 
   @override
@@ -353,6 +361,9 @@ class ServeCommand extends Command<int> {
     final ({AsrModelRegistry registry, Directory? dataRoot}) ctx =
         await _context(this);
     final int port = int.parse(argResults!['port'] as String);
+    if (argResults!['cpu'] as bool && argResults!['coreml'] as bool) {
+      usageException('--cpu 与 --coreml 不能同时使用');
+    }
     final String? token = argResults!['token'] as String?;
     if (token == null && (argResults!['host'] as String) != '127.0.0.1') {
       // 绑到非回环地址却不设令牌，等于把本机的 GPU 和磁盘开放给整个网段。
@@ -360,25 +371,61 @@ class ServeCommand extends Command<int> {
         '警告：监听在 ${argResults!["host"]} 却没设 --token，任何人都能提交任务。',
       );
     }
+    final TranscribeRunner runner = TranscribeRunner(
+      registry: ctx.registry,
+      dataRoot: ctx.dataRoot,
+      forceCpu: argResults!['cpu'] as bool,
+      forceCoreMl: argResults!['coreml'] as bool,
+    );
+    TranscribeRunner? macRunner;
+    TranscribeRunner? multilingualRunner;
+    List<TranscribeBackend>? backends;
+    if (Platform.isMacOS && !(argResults!['cpu'] as bool)) {
+      macRunner = TranscribeRunner(registry: ctx.registry, dataRoot: ctx.dataRoot, forceCoreMl: true);
+      multilingualRunner = TranscribeRunner(registry: ctx.registry, dataRoot: ctx.dataRoot);
+      final apple = AppleTranscribeRunner(executablePath:
+        Platform.environment['ASR_APPLE_TRANSCRIBE'] ??
+        '${File(Platform.resolvedExecutable).parent.path}/apple_transcribe');
+      String? coreMlReason;
+      try {
+        if (!(await FfiOnnxSessionFactory().availableAcceleratedProviders()).contains(OnnxExecutionProvider.coreml)) {
+          coreMlReason = '当前 ONNX Runtime 未包含 CoreML';
+        }
+      } catch (e) { coreMlReason = 'CoreML 运行时不可用：$e'; }
+      backends = [
+        TranscribeBackend(id: 'default', name: 'Fushi 原版 · CPU（推荐）',
+          description: '日语使用原版 ReazonSpeech INT8 快速路径；其他语言按原有模型处理，缺模型时自动下载',
+          service: multilingualRunner, languages: ctx.registry.languages.map((l) => l.tag).toList()),
+        TranscribeBackend(id: 'apple', name: 'Apple SpeechTranscriber',
+          description: 'macOS 原生 · 日语 · 本地转录 · 每次任务独立加载',
+          service: apple, languages: ['ja'], unavailableReason: await apple.unavailableReason()),
+        TranscribeBackend(id: 'coreml', name: 'ReazonSpeech · CoreML（实验）',
+          description: '日语 FP32 · CoreML + CPU · 常驻会话；当前导出图分区较多，可能慢于原版 INT8',
+          service: macRunner, languages: ['ja'], unavailableReason: coreMlReason),
+      ];
+    }
     final AsrServer server = AsrServer(
-      runner: TranscribeRunner(
-        registry: ctx.registry,
-        dataRoot: ctx.dataRoot,
-        forceCpu: argResults!['cpu'] as bool,
-      ),
+      runner: runner,
+      backends: backends,
       registry: ctx.registry,
       token: token,
       concurrency: int.parse(argResults!['concurrency'] as String),
     );
-    final Uri uri = await server.start(
-      host: argResults!['host'] as String,
-      port: port,
-    );
-    stderr.writeln('asr 服务端已启动：$uri');
-    stderr.writeln('界面：$uri　　API：${uri}v1/transcribe');
-    await ProcessSignal.sigint.watch().first;
-    stderr.writeln('\n收到 SIGINT，停止服务');
-    await server.stop();
+    try {
+      final Uri uri = await server.start(
+        host: argResults!['host'] as String,
+        port: port,
+      );
+      stderr.writeln('asr 服务端已启动：$uri');
+      stderr.writeln('界面：$uri　　API：${uri}v1/transcribe');
+      await ProcessSignal.sigint.watch().first;
+      stderr.writeln('\n收到 SIGINT，停止服务');
+      await server.stop();
+    } finally {
+      await runner.close();
+      await macRunner?.close();
+      await multilingualRunner?.close();
+    }
     return 0;
   }
 }

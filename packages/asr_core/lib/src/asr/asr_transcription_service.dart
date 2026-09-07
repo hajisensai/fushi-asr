@@ -14,7 +14,6 @@ import 'package:crypto/crypto.dart';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
-
 import 'package:asr_core/src/asr/asr_cue_builder.dart'
     show AsrCueTokenTiming, parseAsrCueTokens;
 import 'package:asr_core/src/asr/asr_encoder_buckets.dart';
@@ -89,7 +88,7 @@ abstract interface class AsrRunningTranscription {
   /// 事件流（一次性；见 [AsrTranscribeJob.run]）。
   Stream<AsrTranscribeEvent> run();
 
-  void requestPause();
+  void requestPause({bool discardPending = false});
 
   Future<void> dispose();
 }
@@ -125,7 +124,8 @@ class AsrInProcessTranscription implements AsrRunningTranscription {
   Stream<AsrTranscribeEvent> run() => job.run();
 
   @override
-  void requestPause() => job.requestPause();
+  void requestPause({bool discardPending = false}) =>
+      job.requestPause(discardPending: discardPending);
 
   @override
   Future<void> dispose() => sessions.close();

@@ -19,6 +19,9 @@
 ///   避免 62.5 µs 一个样本在 ffmpeg 的微秒时间基里被舍入。调用方给的 `startSample`
 ///   不是 16 的倍数时，向下取整到毫秒去寻址、多要 1 ms、在 Dart 侧丢掉多出的头部并
 ///   截到整块长度，块边界因此仍逐样本精确。
+/// * **尾部余量**：`-t` 限制的是时间戳，不保证重采样后的样本数。MKV 的毫秒时间基
+///   可让 AAC 的 300 s 块少 5 个样本；每块多解码 [kAsrPcmDecodeTailMs] ms，再按样本
+///   截到目标长度。块起点始终按源文件绝对时间计算，不通过累加短块长度移动时间轴。
 /// * **输出容器**：首选 `-f s16le` 裸 PCM。桌面捆绑的最小化 ffmpeg-min 至今
 ///   （n7.1.5，`third_party/ffmpeg-min/windows/ffmpeg.exe`）**没有** `s16le`/`wav`
 ///   muxer——`tool/ffmpeg-min/build-ffmpeg-min.sh` 的白名单已补上，但入库二进制要等
@@ -51,6 +54,9 @@ const int kAsrPcmSeekPreRollSeconds = 2;
 
 /// 16 kHz 下每毫秒的样本数（整数 16），是「毫秒对齐」策略成立的前提。
 const int kAsrPcmSamplesPerMs = kAsrSampleRate ~/ 1000;
+
+/// 覆盖容器时间戳量化及重采样舍入的解码尾部余量；多出的真实 PCM 只用于凑足目标块。
+const int kAsrPcmDecodeTailMs = 10;
 
 /// 每块 ffmpeg 的超时下限（秒）。
 const int kAsrPcmChunkTimeoutFloorSeconds = 60;
@@ -397,7 +403,9 @@ class FfmpegAsrPcmSource implements AsrPcmSource {
       // startSample 不是整毫秒时：寻址向下取整到毫秒，多要 1 ms，丢掉头部多出的样本。
       // 块长是整秒（16 的倍数），所以每块的余数相同。
       final int dropLeading = startSample % kAsrPcmSamplesPerMs;
-      final int durationMs = chunkSeconds * 1000 + (dropLeading > 0 ? 1 : 0);
+      final int durationMs = chunkSeconds * 1000 +
+          (dropLeading > 0 ? 1 : 0) +
+          kAsrPcmDecodeTailMs;
       // 并行：最多 [parallelism] 块同时在解（每块一个 ffmpeg 进程），按块序出。
       // ffmpeg 解 mp3/aac 是单线程的，30 分钟 6 块串行 940 ms、并行 240 ms
       // （2026-09-07 实测）；消费方每拉一块这里就再补一块，块只在被拉时才前进，
@@ -416,6 +424,7 @@ class FfmpegAsrPcmSource implements AsrPcmSource {
       }
 
       int blockStart = startSample;
+      int expectedStart = startSample;
       try {
         while (true) {
           while (inFlight.length < parallelism) {
@@ -433,7 +442,18 @@ class FfmpegAsrPcmSource implements AsrPcmSource {
           }
           // 契约：某块 0 样本即文件末尾（超出 EOF 的 -ss 让 ffmpeg 正常退出、输出为空）。
           if (samples.isEmpty) break;
+          // 真 EOF 的最后一块可以不足目标长度。若后面仍有音频，则不能把短块之后
+          // 的源音频提前，也不能悄悄补静音掩盖丢失的语音；在 PCM 层报出具体缺口。
+          if (blockStart != expectedStart) {
+            throw AsrPcmDecodeException(
+              audioPath,
+              'ffmpeg produced a short non-final PCM block: '
+              'expected next startSample=$expectedStart, actual $blockStart '
+              '(gap=${blockStart - expectedStart} samples)',
+            );
+          }
           yield AsrPcmChunk(startSample: blockStart, samples: samples);
+          expectedStart = blockStart + samples.length;
           blockStart += chunkSamples;
         }
       } finally {

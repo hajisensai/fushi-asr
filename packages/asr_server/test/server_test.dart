@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:asr/asr.dart';
+import 'package:archive/archive.dart';
 import 'package:asr_server/asr_server.dart';
 import 'package:test/test.dart';
 
@@ -16,6 +17,7 @@ class _FakeService implements TranscribeService {
   final String text;
   final Object? error;
   int calls = 0;
+  final paths = <String>[];
 
   @override
   Future<TranscribeOutcome> run({
@@ -23,8 +25,10 @@ class _FakeService implements TranscribeService {
     required AsrLanguage language,
     SubtitleFormat format = SubtitleFormat.srt,
     void Function(TranscribeProgress progress)? onProgress,
+    TranscribeCancellation? cancellation,
   }) async {
     calls++;
+    paths.addAll(audioPaths);
     onProgress?.call(const TranscribeProgress(
       phase: 'transcribe',
       processedMs: 500,
@@ -51,12 +55,14 @@ Future<({AsrServer server, Uri uri})> _start(
   TranscribeService service, {
   String? token,
   int concurrency = 1,
+  List<TranscribeBackend>? backends,
 }) async {
   final AsrServer server = AsrServer(
     runner: service,
     registry: AsrModelRegistry.builtin(),
     token: token,
     concurrency: concurrency,
+    backends: backends,
   );
   // 端口 0：让系统挑一个空闲端口。写死端口会在 Windows 上撞进
   // 「访问权限不允许」的保留区间（实测 8644 就是），也会撞并发跑的其它测试。
@@ -83,8 +89,7 @@ Future<List<Map<String, Object?>>> _postRaw(
     final String text = await utf8.decodeStream(res);
     return <Map<String, Object?>>[
       for (final String line in const LineSplitter().convert(text))
-        if (line.trim().isNotEmpty)
-          jsonDecode(line) as Map<String, Object?>,
+        if (line.trim().isNotEmpty) jsonDecode(line) as Map<String, Object?>,
     ];
   } finally {
     client.close(force: true);
@@ -93,6 +98,140 @@ Future<List<Map<String, Object?>>> _postRaw(
 
 void main() {
   final List<int> audio = utf8.encode('not really audio');
+
+  test(
+      'EPUB multipart runs shared alignment and returns raw plus aligned subtitles',
+      () async {
+    final fake = _FakeService(text: '今日はいい天気ですね');
+    final s = await _start(fake);
+    addTearDown(s.server.stop);
+    final archive = Archive();
+    for (final entry in {
+      'META-INF/container.xml':
+          '<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>',
+      'book.opf':
+          '<package><metadata><title>Example</title><language>ja</language></metadata><manifest><item id="ch" href="ch.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="ch"/></spine></package>',
+      'ch.xhtml': '<html><body><p>今日はいい天気ですね。</p></body></html>',
+    }.entries) {
+      final data = utf8.encode(entry.value);
+      archive.add(ArchiveFile(entry.key, data.length, data));
+    }
+    final book = ZipEncoder().encode(archive);
+    final client = HttpClient();
+    addTearDown(() => client.close(force: true));
+    Future<List<Map<String, dynamic>>> send(List<int> epub,
+        {bool includeAudio = true}) async {
+      final req = await client.postUrl(
+          s.uri.resolve('v1/transcribe?language=ja&filename=sample.wav'));
+      req.headers.contentType = ContentType('multipart', 'form-data',
+          parameters: {'boundary': 'fushi-test-boundary'});
+      req.add(utf8.encode(
+          '--fushi-test-boundary\r\nContent-Disposition: form-data; name="epub"; filename="book.epub"\r\n\r\n'));
+      req.add(epub);
+      if (includeAudio) {
+        req.add(utf8.encode(
+            '\r\n--fushi-test-boundary\r\nContent-Disposition: form-data; name="audio"; filename="sample.wav"\r\n\r\n'));
+        req.add(audio);
+      }
+      req.add(utf8.encode('\r\n--fushi-test-boundary--\r\n'));
+      final response = await req.close();
+      final body = await utf8.decodeStream(response);
+      return [
+        for (final line in const LineSplitter().convert(body))
+          jsonDecode(line) as Map<String, dynamic>
+      ];
+    }
+
+    final events = await send(book);
+    expect(events.map((e) => e['phase']),
+        containsAllInOrder(['book', 'transcribe', 'align', 'result']));
+    final result = events.last;
+    expect(result['text'], contains('今日はいい天気ですね。'));
+    expect(result['rawText'], '今日はいい天気ですね');
+    expect(result['alignment']['matchedCues'], 1);
+    expect(result['alignment']['timingMode'], 'segment-preserved');
+    expect(fake.calls, 1);
+    final broken = await send(utf8.encode('not a zip'));
+    expect(broken.last['phase'], 'error');
+    expect(fake.calls, 1, reason: 'invalid EPUB rejected before transcription');
+    final missing = await send(book, includeAudio: false);
+    expect(missing.single['error'], contains('同时上传'));
+    expect(fake.calls, 1);
+  });
+
+  test(
+      'backend routing uses chosen service, keeps omitted engine compatible, and creates fresh jobs',
+      () async {
+    final original = _FakeService(text: 'default');
+    final apple = _FakeService(text: 'Apple');
+    final coreml = _FakeService(text: 'CoreML');
+    final s = await _start(original, backends: [
+      TranscribeBackend(
+          id: 'apple',
+          name: 'Apple',
+          description: 'native',
+          service: apple,
+          languages: ['ja']),
+      TranscribeBackend(
+          id: 'coreml',
+          name: 'CoreML',
+          description: 'reused',
+          service: coreml,
+          languages: ['ja']),
+    ]);
+    addTearDown(s.server.stop);
+    for (final id in ['apple', 'coreml', 'coreml']) {
+      final events = await _postRaw(s.uri, audio,
+          query: 'language=ja&engine=$id&filename=same.wav');
+      final result = events.last;
+      expect(result['engine'], id);
+      expect(result['text'], id == 'apple' ? 'Apple' : 'CoreML');
+    }
+    expect(apple.calls, 1);
+    expect(coreml.calls, 2);
+    expect(
+        coreml.paths.map((p) => p.split(Platform.pathSeparator).last).toSet(),
+        hasLength(2));
+    await _postRaw(s.uri, audio);
+    expect(original.calls, 1);
+    final client = HttpClient();
+    addTearDown(() => client.close(force: true));
+    final response =
+        await (await client.getUrl(s.uri.resolve('v1/backends'))).close();
+    final data = jsonDecode(await utf8.decodeStream(response)) as Map;
+    expect((data['backends'] as List).map((b) => b['id']), ['apple', 'coreml']);
+  });
+
+  test(
+      'unknown, unavailable and unsupported-language backends fail before inference',
+      () async {
+    final fake = _FakeService();
+    final s = await _start(fake, backends: [
+      TranscribeBackend(
+          id: 'apple',
+          name: 'Apple',
+          description: '',
+          service: fake,
+          languages: ['ja']),
+      TranscribeBackend(
+          id: 'unavailable',
+          name: 'Unavailable',
+          description: '',
+          service: fake,
+          languages: ['ja'],
+          unavailableReason: 'missing assets'),
+    ]);
+    addTearDown(s.server.stop);
+    for (final query in [
+      'language=ja&engine=bad',
+      'language=en&engine=apple',
+      'language=ja&engine=unavailable'
+    ]) {
+      final events = await _postRaw(s.uri, audio, query: query);
+      expect(events.single['error'], isA<String>());
+    }
+    expect(fake.calls, 0);
+  });
 
   test('非 ASCII 字幕能原样回传（latin1 回归门）', () async {
     // 回归门：`HttpResponse.write(String)` 的 IOSink 默认编码是 **latin1**，
@@ -115,8 +254,9 @@ void main() {
     final ({AsrServer server, Uri uri}) s = await _start(_FakeService());
     addTearDown(s.server.stop);
     final List<Map<String, Object?>> events = await _postRaw(s.uri, audio);
-    final List<String> phases =
-        <String>[for (final Map<String, Object?> e in events) '${e['phase']}'];
+    final List<String> phases = <String>[
+      for (final Map<String, Object?> e in events) '${e['phase']}'
+    ];
     expect(phases.first, 'queued');
     expect(phases.last, 'result');
     expect(phases, contains('transcribe'));
@@ -138,8 +278,8 @@ void main() {
     addTearDown(s.server.stop);
     final HttpClient client = HttpClient();
     addTearDown(() => client.close(force: true));
-    final HttpClientRequest req = await client
-        .postUrl(s.uri.resolve('v1/transcribe?language=zzz'));
+    final HttpClientRequest req =
+        await client.postUrl(s.uri.resolve('v1/transcribe?language=zzz'));
     req.add(audio);
     final HttpClientResponse res = await req.close();
     expect(res.statusCode, HttpStatus.badRequest);
@@ -162,8 +302,7 @@ void main() {
 
   test('设了令牌：没带 / 带错 → 401，带对 → 放行', () async {
     final _FakeService fake = _FakeService();
-    final ({AsrServer server, Uri uri}) s =
-        await _start(fake, token: 'sekrit');
+    final ({AsrServer server, Uri uri}) s = await _start(fake, token: 'sekrit');
     addTearDown(s.server.stop);
 
     final HttpClient client = HttpClient();
@@ -201,14 +340,18 @@ void main() {
     addTearDown(s.server.stop);
     final HttpClient client = HttpClient();
     addTearDown(() => client.close(force: true));
-    final HttpClientResponse res =
-        await (await client.getUrl(s.uri)).close();
+    final HttpClientResponse res = await (await client.getUrl(s.uri)).close();
     final String html = await utf8.decodeStream(res);
     expect(html, startsWith('<!doctype html>'));
     expect(html, contains('生成字幕'), reason: '中文标题也走同一条编码路径');
     // 服务端常跑在内网 / 离线机器上：界面依赖 CDN 就等于在最需要它的场合打不开。
-    expect(html, isNot(contains('http://')));
-    expect(html.contains('https://'), isFalse);
+    // SVG's xmlns is an identifier, not a fetched resource. Actual resources
+    // must still be embedded (including Tailwind and all JavaScript).
+    expect(RegExp(r'''(?:src|href)=["']https?://''').hasMatch(html), isFalse);
+    expect(RegExp(r'''url\(["']?https?://''').hasMatch(html), isFalse);
+    expect(html, contains('tailwindcss'));
+    expect(html, contains('转录预计剩余'));
+    expect(html, contains('FushiProgress'));
   });
 
   test('AsrClient 能跑通一次完整往返', () async {
@@ -244,6 +387,32 @@ void main() {
     await Future.wait(<Future<List<Map<String, Object?>>>>[a, b]);
     expect(slow.started, 2);
   });
+
+  test('queued event is flushed before waiting for a busy engine', () async {
+    final slow = _SlowService();
+    final s = await _start(slow);
+    addTearDown(s.server.stop);
+    addTearDown(slow.release);
+    final client = HttpClient();
+    addTearDown(() => client.close(force: true));
+    Future<StreamIterator<String>> open() async {
+      final req = await client.postUrl(s.uri.resolve('v1/transcribe?language=ja'));
+      req.add(audio);
+      final res = await req.close();
+      return StreamIterator(res.transform(utf8.decoder).transform(const LineSplitter()));
+    }
+    final first = await open();
+    expect(await first.moveNext(), isTrue);
+    expect(jsonDecode(first.current)['phase'], 'queued');
+    final second = await open();
+    expect(await second.moveNext().timeout(const Duration(seconds: 2)), isTrue);
+    expect(jsonDecode(second.current)['phase'], 'queued');
+    expect(slow.started, 1, reason: 'second job must still be waiting');
+    slow.release();
+    while (await first.moveNext()) {}
+    while (await second.moveNext()) {}
+    expect(slow.started, 2);
+  });
 }
 
 /// 会一直等到 [release] 才返回的转录器，用来观察并发闸门。
@@ -271,6 +440,7 @@ class _SlowService implements TranscribeService {
     required AsrLanguage language,
     SubtitleFormat format = SubtitleFormat.srt,
     void Function(TranscribeProgress progress)? onProgress,
+    TranscribeCancellation? cancellation,
   }) async {
     started++;
     _running++;

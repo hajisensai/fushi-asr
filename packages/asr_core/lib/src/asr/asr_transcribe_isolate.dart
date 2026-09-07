@@ -347,10 +347,11 @@ class AsrIsolateTranscription implements AsrRunningTranscription {
   }
 
   @override
-  void requestPause() {
+  void requestPause({bool discardPending = false}) {
     if (_pauseRequested) return;
     _pauseRequested = true;
-    unawaited(_control.then((SendPort port) => port.send(_kPauseMessage)));
+    unawaited(_control.then((SendPort port) =>
+        port.send(discardPending ? 'cancel' : _kPauseMessage)));
   }
 
   /// 会话归 isolate 所有：这里只能请求暂停并等它在下一个检查点关会话退出；
@@ -370,11 +371,13 @@ Future<void> _isolateMain(_IsolateArgs args) async {
   final ReceivePort control = ReceivePort();
   AsrTranscribeJob? job;
   bool pauseBeforeStart = false;
+  bool discardPending = false;
   control.listen((Object? message) {
-    if (message != _kPauseMessage) return;
+    if (message != _kPauseMessage && message != 'cancel') return;
+    discardPending = discardPending || message == 'cancel';
     final AsrTranscribeJob? j = job;
     if (j != null) {
-      j.requestPause();
+      j.requestPause(discardPending: discardPending);
     } else {
       pauseBeforeStart = true;
     }
@@ -424,17 +427,16 @@ Future<void> _isolateMain(_IsolateArgs args) async {
       pcm: pcm,
       segmenter: switch (spec.segmenterKind) {
         AsrSegmenterKind.energy => AsrVadSegmenter(
-          scorer: EnergyVadScorer(),
-          maxSegmentMs: maxSegmentMs,
-        ),
+            scorer: EnergyVadScorer(),
+            maxSegmentMs: maxSegmentMs,
+          ),
         AsrSegmenterKind.silero => AsrVadSegmenter(
-          session: sessions.vad,
-          maxSegmentMs: maxSegmentMs,
-        ),
+            session: sessions.vad,
+            maxSegmentMs: maxSegmentMs,
+          ),
       },
       decoder: decoder,
-      batchSize:
-          spec.batchSize ??
+      batchSize: spec.batchSize ??
           AsrTranscriptionService.defaultBatchSizeFor(
             sessions.encoderResolution.effective,
           ),
@@ -443,7 +445,7 @@ Future<void> _isolateMain(_IsolateArgs args) async {
       usePipeline: spec.usePipeline,
     );
     job = j;
-    if (pauseBeforeStart) j.requestPause();
+    if (pauseBeforeStart) j.requestPause(discardPending: discardPending);
     await for (final AsrTranscribeEvent e in j.run()) {
       // 统计先于收尾事件发出：主侧在 finished / paused 一到就读 decodeStats。
       if (e is AsrTranscribeFinishedEvent || e is AsrTranscribePausedEvent) {
@@ -468,4 +470,3 @@ Future<void> _isolateMain(_IsolateArgs args) async {
     control.close();
   }
 }
-
