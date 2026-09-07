@@ -18,6 +18,10 @@ import 'package:mime/mime.dart';
 
 import 'package:asr_server/src/web_ui.dart';
 
+/// 放弃 multipart 解析后仍愿意读完的请求体余量。把剩余字节读掉是为了让 400 响应
+/// 真的送达（见 `_receiveUpload`）；超过这个余量的请求体不值得继续收。
+const int kUploadDrainSlackBytes = 8 * 1024 * 1024;
+
 class TranscribeBackend {
   const TranscribeBackend(
       {required this.id,
@@ -298,6 +302,18 @@ class AsrServer {
       cancellation.cancel();
     }));
     Directory? work;
+    // 契约：客户端收到最后一行时，上传的临时文件已经不在了。所以清理必须发生在
+    // 关闭响应之前；finally 里那次只是异常路径的兜底。
+    void cleanupWork() {
+      final Directory? dir = work;
+      if (dir == null || !dir.existsSync()) return;
+      try {
+        dir.deleteSync(recursive: true);
+      } on FileSystemException {
+        // 转录进程可能还占着；留给系统清临时目录。
+      }
+    }
+
     try {
       final temp = await Directory.systemTemp.createTemp('asr_upload_');
       work = temp;
@@ -442,6 +458,7 @@ class AsrServer {
       } finally {
         if (acquired) _release();
       }
+      cleanupWork();
       await response.close();
     } on TranscribeCancelled {
       // Cancellation while uploading: no inference has started yet.
@@ -449,15 +466,10 @@ class AsrServer {
       response.headers.contentType =
           ContentType('application', 'x-ndjson', charset: 'utf-8');
       response.add(utf8.encode('${jsonEncode({'phase': 'cancelled'})}\n'));
+      cleanupWork();
       await response.close();
     } finally {
-      if (work != null && work.existsSync()) {
-        try {
-          work.deleteSync(recursive: true);
-        } on FileSystemException {
-          // 转录进程可能还占着；留给系统清临时目录。
-        }
-      }
+      cleanupWork();
       _tasks.remove(id);
       if (!task.finished.isCompleted) task.finished.complete();
     }
@@ -511,50 +523,102 @@ class AsrServer {
     }
     final seen = <String>{};
     StreamIterator<MimeMultipart>? parts;
-    await _guardMultipart(() async {
-      final incoming = parts = StreamIterator(request
-          .cast<List<int>>()
-          .transform(MimeMultipartTransformer(boundary)));
-      try {
-        while (await incoming.moveNext()) {
-          final part = incoming.current;
-          HeaderValue disposition;
-          try {
-            disposition =
-                HeaderValue.parse(part.headers['content-disposition'] ?? '');
-          } on HttpException {
-            throw const FormatException('上传文件的 Content-Disposition 无效');
-          }
-          final name = disposition.parameters['name'];
-          if (!{'audio', attachmentName}.contains(name) || !seen.add(name!)) {
-            throw FormatException('只允许唯一 audio 和 $attachmentName 文件');
-          }
-          if (retiming) {
-            final filename = disposition.parameters['filename'];
-            if (disposition.value != 'form-data' ||
-                filename == null ||
-                filename.trim().isEmpty) {
-              throw const FormatException('audio 和 subtitle 必须是带文件名的上传文件');
-            }
-            if (name == 'subtitle' &&
-                !RegExp(r'\.(srt|vtt)$', caseSensitive: false)
-                    .hasMatch(filename)) {
-              throw const FormatException('字幕仅支持 UTF-8 编码的 SRT 或 VTT 文件');
-            }
-          }
-          await save(part, name == 'audio' ? audio : attachment,
-              name == 'audio' ? maxUploadBytes : attachmentLimit);
+    // dart:io 在 request body 的订阅被取消时就地拆连接，与「写 400 响应」竞速：
+    // multipart 解析出错时先取消订阅再写响应，客户端多半只看到连接被关掉
+    // （Connection closed before full header was received）。这里自己持有 body
+    // 订阅并做背压转发：解析器中止只关中继，剩余请求体仍由我们读完，响应才送得出去。
+    final relay = StreamController<List<int>>();
+    final bodyDone = Completer<void>();
+    bool relayOpen = true;
+    int drained = 0;
+    // 放弃解析后还愿意继续读的字节上界；越界（恶意大包）就不再为一句 400 收下去。
+    int? drainLimit;
+    late final StreamSubscription<List<int>> body;
+    body = request.listen(
+      (List<int> chunk) {
+        drained += chunk.length;
+        if (relayOpen) {
+          relay.add(chunk);
+          return;
         }
-      } finally {
-        await incoming.cancel();
+        final int? limit = drainLimit;
+        if (limit != null && drained > limit) {
+          if (!bodyDone.isCompleted) bodyDone.complete();
+          unawaited(body.cancel());
+        }
+      },
+      onError: (Object error, StackTrace stack) {
+        if (relayOpen) relay.addError(error, stack);
+      },
+      onDone: () {
+        if (relayOpen) {
+          relayOpen = false;
+          relay.close();
+        }
+        if (!bodyDone.isCompleted) bodyDone.complete();
+      },
+      cancelOnError: false,
+    );
+    relay
+      ..onPause = body.pause
+      ..onResume = body.resume
+      // 解析器取消 = 停止转发，但订阅仍归我们，剩余请求体继续读掉。
+      ..onCancel = () => relayOpen = false;
+
+    try {
+      await _guardMultipart(() async {
+        final incoming = parts = StreamIterator(
+            relay.stream.transform(MimeMultipartTransformer(boundary)));
+        try {
+          while (await incoming.moveNext()) {
+            final part = incoming.current;
+            HeaderValue disposition;
+            try {
+              disposition =
+                  HeaderValue.parse(part.headers['content-disposition'] ?? '');
+            } on HttpException {
+              throw const FormatException('上传文件的 Content-Disposition 无效');
+            }
+            final name = disposition.parameters['name'];
+            if (!{'audio', attachmentName}.contains(name) || !seen.add(name!)) {
+              throw FormatException('只允许唯一 audio 和 $attachmentName 文件');
+            }
+            if (retiming) {
+              final filename = disposition.parameters['filename'];
+              if (disposition.value != 'form-data' ||
+                  filename == null ||
+                  filename.trim().isEmpty) {
+                throw const FormatException('audio 和 subtitle 必须是带文件名的上传文件');
+              }
+              if (name == 'subtitle' &&
+                  !RegExp(r'\.(srt|vtt)$', caseSensitive: false)
+                      .hasMatch(filename)) {
+                throw const FormatException('字幕仅支持 UTF-8 编码的 SRT 或 VTT 文件');
+              }
+            }
+            await save(part, name == 'audio' ? audio : attachment,
+                name == 'audio' ? maxUploadBytes : attachmentLimit);
+          }
+        } finally {
+          await incoming.cancel();
+        }
+      }, () async {
+        try {
+          await activeUpload?.cancel();
+        } finally {
+          await parts?.cancel();
+        }
+      });
+    } finally {
+      if (relayOpen) {
+        relayOpen = false;
+        // 不 await：中继的 done 要等解析器那侧消费，这里只要求停止转发。
+        unawaited(relay.close());
       }
-    }, () async {
-      try {
-        await activeUpload?.cancel();
-      } finally {
-        await parts?.cancel();
-      }
-    });
+      drainLimit = drained + kUploadDrainSlackBytes;
+      await bodyDone.future;
+      await body.cancel();
+    }
     if (!seen.containsAll(['audio', attachmentName])) {
       throw FormatException('必须同时上传 audio 和 $attachmentName');
     }
