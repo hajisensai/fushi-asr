@@ -5,8 +5,8 @@ library;
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:asr_align/asr_align.dart' show AudioTextNormalizer;
-import 'package:asr_core/asr_core.dart' show AsrCueTokenTiming;
+import 'package:fushi_asr_align/asr_align.dart' show AudioTextNormalizer;
+import 'package:fushi_asr_core/asr_core.dart' show AsrCueTokenTiming;
 
 import 'cancellation.dart';
 import 'subtitle_format.dart';

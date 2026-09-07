@@ -28,18 +28,18 @@ import 'dart:isolate';
 
 import 'package:meta/meta.dart';
 
-import 'package:asr_core/src/asr/asr_encoder_buckets.dart';
-import 'package:asr_core/src/asr/asr_engine.dart';
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/asr/asr_model_store.dart';
-import 'package:asr_core/src/asr/asr_pcm_bridge.dart';
-import 'package:asr_core/src/asr/asr_transcribe_job.dart';
-import 'package:asr_core/src/asr/asr_transcription_service.dart';
-import 'package:asr_core/src/asr/asr_transducer_decoder.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/util/log.dart';
-import 'package:asr_core/src/asr/asr_vad.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_encoder_buckets.dart';
+import 'package:fushi_asr_core/src/asr/asr_engine.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_store.dart';
+import 'package:fushi_asr_core/src/asr/asr_pcm_bridge.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_job.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcription_service.dart';
+import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/util/log.dart';
+import 'package:fushi_asr_core/src/asr/asr_vad.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 /// 跨 isolate 的任务说明：全是路径 / 枚举 / 数值，不带闭包与会话。
 @immutable

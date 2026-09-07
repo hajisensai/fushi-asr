@@ -1,4 +1,4 @@
-import 'package:asr/src/subtitle_speech_text.dart';
+import 'package:fushi_asr/src/subtitle_speech_text.dart';
 import 'package:test/test.dart';
 
 void main() {

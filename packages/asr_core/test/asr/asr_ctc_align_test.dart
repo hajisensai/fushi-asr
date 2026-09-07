@@ -2,8 +2,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_ctc_align.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_ctc_align.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 /// Omnilingual 形态的词表：`<s>`=blank(0)、`<pad>`、`</s>`、`<unk>`、空格 token、字符。
 const String _kTokens = '<s> 0\n<pad> 1\n</s> 2\n<unk> 3\n  4\na 5\nb 6\nc 7\n';

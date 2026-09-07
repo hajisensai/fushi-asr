@@ -27,7 +27,7 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:asr_core/src/onnx/onnx_proto.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_proto.dart';
 
 /// 生成图的命名约定（测试与诊断用）。
 abstract final class AsrFp16Graph {

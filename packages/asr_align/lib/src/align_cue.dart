@@ -1,7 +1,7 @@
 /// 对齐层的 cue 类型。
 library;
 
-import 'package:asr_core/asr_core.dart' show AsrCueTokenTiming;
+import 'package:fushi_asr_core/asr_core.dart' show AsrCueTokenTiming;
 
 /// 单条对齐片段，粒度为句子级别。
 ///

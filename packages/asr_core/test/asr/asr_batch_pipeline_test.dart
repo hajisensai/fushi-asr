@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_transcribe_job.dart';
-import 'package:asr_core/src/asr/asr_transducer_decoder.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_job.dart';
+import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 /// 三段都由测试手动放行的假解码器：能精确观察「谁在等谁」。
 class _Manual implements AsrPipelinedDecoder {

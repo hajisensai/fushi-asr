@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:asr/asr.dart';
+import 'package:fushi_asr/asr.dart';
 import 'package:test/test.dart';
 
 SubtitleCue cue(String text, int start, int end, {int index = 1}) =>

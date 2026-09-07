@@ -1,8 +1,8 @@
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_encoder_buckets.dart';
-import 'package:asr_core/src/asr/asr_fbank.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/asr/asr_vad.dart';
+import 'package:fushi_asr_core/src/asr/asr_encoder_buckets.dart';
+import 'package:fushi_asr_core/src/asr/asr_fbank.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_vad.dart';
 
 /// 静态桶模式下，**最长可能的 VAD 段必须仍装得进最大的桶**。
 ///

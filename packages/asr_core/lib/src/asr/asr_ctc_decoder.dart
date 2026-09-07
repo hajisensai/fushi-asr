@@ -21,17 +21,17 @@ import 'dart:math' as math;
 
 import 'dart:typed_data';
 import 'package:meta/meta.dart';
-import 'package:asr_core/src/asr/asr_encoder_buckets.dart';
-import 'package:asr_core/src/asr/asr_transcribe_job.dart'
+import 'package:fushi_asr_core/src/asr/asr_encoder_buckets.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_job.dart'
     show
         AsrBatchDecoder,
         AsrBatchShaper,
         AsrPipelinedDecoder,
         AsrSegmentDecoder;
-import 'package:asr_core/src/asr/asr_transducer_decoder.dart'
+import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart'
     show AsrBatchFeatures, AsrDecodeStats, AsrEncodedBatch;
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 /// CTC 模型在 GPU 上的静态桶（时间轴 = 样本数；无哨兵行）：6 / 12 / 21 s，
 /// 盖住 VAD 默认 20 s 段上限 + 两侧 pad。行数随长度递减，`N × S` 面积相近。

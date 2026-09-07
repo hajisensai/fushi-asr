@@ -7,14 +7,14 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:asr_core/asr_core.dart';
+import 'package:fushi_asr_core/asr_core.dart';
 import 'package:ffi/ffi.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
-import 'package:asr_onnx_ffi/src/ffi/onnxruntime_bindings.dart';
-import 'package:asr_onnx_ffi/src/ort_runtime.dart';
-import 'package:asr_onnx_ffi/src/ffi_onnx_session.dart';
+import 'package:fushi_asr_onnx_ffi/src/ffi/onnxruntime_bindings.dart';
+import 'package:fushi_asr_onnx_ffi/src/ort_runtime.dart';
+import 'package:fushi_asr_onnx_ffi/src/ffi_onnx_session.dart';
 import 'macos_session_tuning.dart';
 import 'coreml_specialization.dart';
 

@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:asr/asr.dart';
-import 'package:asr_server/asr_server.dart';
+import 'package:fushi_asr/asr.dart';
+import 'package:fushi_asr_server/asr_server.dart';
 import 'package:test/test.dart';
 
 class Controlled implements TranscribeService {

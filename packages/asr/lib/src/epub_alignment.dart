@@ -1,9 +1,9 @@
 import 'dart:io';
 import 'cancellation.dart';
-import 'package:asr_align/asr_align.dart';
+import 'package:fushi_asr_align/asr_align.dart';
 import 'subtitle_format.dart';
 import 'transcribe_runner.dart';
-export 'package:asr_align/asr_align.dart'
+export 'package:fushi_asr_align/asr_align.dart'
     show EpubBook, readEpubBook, maxEpubBytes;
 
 class BookAlignedSubtitles {

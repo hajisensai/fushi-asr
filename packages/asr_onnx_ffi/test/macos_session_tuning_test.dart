@@ -1,5 +1,5 @@
-import 'package:asr_core/asr_core.dart';
-import 'package:asr_onnx_ffi/src/macos_session_tuning.dart';
+import 'package:fushi_asr_core/asr_core.dart';
+import 'package:fushi_asr_onnx_ffi/src/macos_session_tuning.dart';
 import 'package:test/test.dart';
 
 void main() {

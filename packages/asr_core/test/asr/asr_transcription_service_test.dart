@@ -1,13 +1,13 @@
 import 'dart:io';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_engine.dart';
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/asr/asr_model_store.dart';
-import 'package:asr_core/src/asr/asr_transcribe_job.dart';
-import 'package:asr_core/src/asr/asr_transcribe_isolate.dart';
-import 'package:asr_core/src/asr/asr_transcription_service.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_engine.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_store.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_job.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_isolate.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcription_service.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 import 'package:path/path.dart' as p;
 
 /// 只覆盖 EP 探测：可让探测抛错（模拟有 GPU 的机器 ORT 探测本身失败）。

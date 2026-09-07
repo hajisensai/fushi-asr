@@ -1,5 +1,5 @@
 import 'package:test/test.dart';
-import 'package:asr_align/asr_align.dart';
+import 'package:fushi_asr_align/asr_align.dart';
 
 AlignCue _cue(int idx, String text) => AlignCue()
   ..bookKey = 'test'

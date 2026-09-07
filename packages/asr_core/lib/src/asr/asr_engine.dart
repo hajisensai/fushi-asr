@@ -2,27 +2,27 @@
 ///
 /// 策略是纯函数（[selectAsrEncoderProviders] / [recommendAsrEncoderVariant]），
 /// IO 只在 [AsrEngineLoader]。会话抽象来自共享层 `onnx_inference.dart`，真实现是
-/// 由宿主注入（桌面/服务端是 `asr_onnx_ffi` 的 FFI 工厂，Flutter 宿主是插件工厂）。
+/// 由宿主注入（桌面/服务端是 `fushi_asr_onnx_ffi` 的 FFI 工厂，Flutter 宿主是插件工厂）。
 library;
 
 import 'dart:developer' as developer;
 import 'dart:io';
 
-import 'package:asr_core/src/asr/asr_ctc_decoder.dart';
-import 'package:asr_core/src/asr/asr_encoder_buckets.dart';
-import 'package:asr_core/src/asr/asr_fp16_graph.dart';
-import 'package:asr_core/src/asr/asr_greedy_graph.dart';
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/asr/asr_model_store.dart';
-import 'package:asr_core/src/asr/asr_transcribe_job.dart' show AsrSegmentDecoder;
-import 'package:asr_core/src/asr/asr_transducer_decoder.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/asr/asr_vad.dart' show kAsrDefaultMaxSegmentMs;
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_ctc_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_encoder_buckets.dart';
+import 'package:fushi_asr_core/src/asr/asr_fp16_graph.dart';
+import 'package:fushi_asr_core/src/asr/asr_greedy_graph.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_store.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_job.dart' show AsrSegmentDecoder;
+import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_vad.dart' show kAsrDefaultMaxSegmentMs;
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 /// 本子系统的 `dart:developer` 日志通道名（整本转录跑在后台 isolate，理由同
 /// `kOnnxLogName`）。
-export 'package:asr_core/src/asr/asr_types.dart' show kAsrLogName;
+export 'package:fushi_asr_core/src/asr/asr_types.dart' show kAsrLogName;
 
 /// 加速偏好：自动、CPU，或显式选择 macOS FP32 CoreML。
 enum AsrAccelerationPreference { auto, cpuOnly, coreml }
@@ -321,7 +321,7 @@ class AsrEngineLoader {
   /// —— 判据里混进了一个测试无法控制的量。生产路径不传，取宿主真值。
   ///
   /// [factory] 是**必填**的：本包不自带 ONNX 后端。桌面 / 服务端注入
-  /// `asr_onnx_ffi` 的 FFI 工厂，Flutter 宿主注入插件工厂（`OrtOnnxSessionFactory`）。
+  /// `fushi_asr_onnx_ffi` 的 FFI 工厂，Flutter 宿主注入插件工厂（`OrtOnnxSessionFactory`）。
   /// 抽包前这里默认 new 一个插件工厂，那条默认值正是把整条依赖链钉死在 Flutter 上
   /// 的东西。
   AsrEngineLoader({required OnnxSessionFactory factory, AsrPlatform? platform})

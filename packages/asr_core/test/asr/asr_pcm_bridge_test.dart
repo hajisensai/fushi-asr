@@ -3,8 +3,8 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_pcm_bridge.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_pcm_bridge.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 /// BUG-2197：PCM 解码留在根 isolate，转录 isolate 经 [RemoteAsrPcmSource] 按块拉。
 /// 这里真起一个 isolate：宿主在测试 isolate（扮根 isolate），远端在子 isolate。

@@ -3,10 +3,10 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 
 import '../support/onnx_factory_probes.dart';
-import 'package:asr_core/src/asr/asr_ctc_decoder.dart';
-import 'package:asr_core/src/asr/asr_encoder_buckets.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_ctc_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_encoder_buckets.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 /// Omnilingual 形态的词表：`<s>`=blank(0)、`<pad>`、`</s>`、`<unk>`、空格 token、字符。
 const String _kTokens = '<s> 0\n<pad> 1\n</s> 2\n<unk> 3\n  4\na 5\nb 6\nc 7\n';

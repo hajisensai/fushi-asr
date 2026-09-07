@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_fbank.dart';
+import 'package:fushi_asr_core/src/asr/asr_fbank.dart';
 
 /// 真实语音 wav（edge-tts `ja-JP-NanamiNeural`「今日はいい天気ですね。」，ffmpeg 转
 /// 16 kHz 单声道 s16）的 fbank 与 kaldi-native-fbank 黄金特征逐值对拍。

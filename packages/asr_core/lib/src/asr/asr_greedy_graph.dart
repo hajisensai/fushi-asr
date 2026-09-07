@@ -46,7 +46,7 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:asr_core/src/onnx/onnx_proto.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_proto.dart';
 
 /// 生成图的对外 IO 名。
 abstract final class AsrGreedyGraphIo {

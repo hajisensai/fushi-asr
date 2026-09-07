@@ -4,7 +4,7 @@
 /// zipformer RNN-T（贪心 Loop 图）或 CTC 解码 → cue 合并 → SRT / VTT。
 ///
 /// 本包**不自带 ONNX 后端**：算法层只依赖 [OnnxSessionFactory] 这个窄接口，
-/// 由宿主注入（桌面 / 服务端用 `asr_onnx_ffi`，Flutter 宿主用插件后端）。
+/// 由宿主注入（桌面 / 服务端用 `fushi_asr_onnx_ffi`，Flutter 宿主用插件后端）。
 /// 这是整套代码能同时服务 app、CLI 和服务端的唯一原因，别往这层塞具体实现。
 library;
 

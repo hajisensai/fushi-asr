@@ -259,8 +259,8 @@ Profile：`build/coreml-profile/`。音频、转录、缓存均保留在本机�
 借给两个任务。切换语言、任务失败时清理缓存；显式 `runner.close()` 等待已接收任务
 完成后释放全部会话。模型会常驻内存，调用者应在结束使用时关闭 runner。
 
-- `asr serve --coreml`：同一服务的后续请求受益，退出服务时释放。
-- 单次 `asr transcribe --coreml`：依然包含首次加载，不能获得跨进程会话复用收益。
+- `fushi-subs serve --coreml`：同一服务的后续请求受益，退出服务时释放。
+- 单次 `fushi-subs transcribe --coreml`：依然包含首次加载，不能获得跨进程会话复用收益。
 - Dart 宿主：保留一个 runner，最后在 `finally` 中 `await runner.close()`。
 - `reuseCoreMlSessions: false` 可回到原先每任务独立 isolate 的路径，供 A/B。
 - 仅 `Platform.isMacOS && forceCoreMl` 开启。Windows CUDA/DirectML 后端选择、

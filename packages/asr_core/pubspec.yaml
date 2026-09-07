@@ -1,4 +1,4 @@
-name: asr_core
+name: fushi_asr_core
 description: Pure Dart speech recognition core - VAD, fbank, zipformer RNN-T and CTC decoding, batching, subtitle output.
 version: 0.1.0
 publish_to: none

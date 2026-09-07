@@ -14,21 +14,21 @@ import 'package:crypto/crypto.dart';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
-import 'package:asr_core/src/asr/asr_cue_builder.dart'
+import 'package:fushi_asr_core/src/asr/asr_cue_builder.dart'
     show AsrCueTokenTiming, parseAsrCueTokens;
-import 'package:asr_core/src/asr/asr_encoder_buckets.dart';
-import 'package:asr_core/src/asr/asr_engine.dart';
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/asr/asr_model_store.dart';
-import 'package:asr_core/src/asr/asr_pcm_source.dart';
-import 'package:asr_core/src/asr/asr_transcribe_isolate.dart';
-import 'package:asr_core/src/asr/asr_transcribe_job.dart';
-import 'package:asr_core/src/asr/asr_transducer_decoder.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/asr/asr_vad.dart';
-import 'package:asr_core/src/onnx/model_file_downloader.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
-import 'package:asr_core/src/util/asr_paths.dart';
+import 'package:fushi_asr_core/src/asr/asr_encoder_buckets.dart';
+import 'package:fushi_asr_core/src/asr/asr_engine.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_store.dart';
+import 'package:fushi_asr_core/src/asr/asr_pcm_source.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_isolate.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_job.dart';
+import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_vad.dart';
+import 'package:fushi_asr_core/src/onnx/model_file_downloader.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/util/asr_paths.dart';
 
 /// 切段器种类：默认能量门限（零模型调用，见 `asr_vad.dart` 文件头的实测依据）；
 /// silero 作为带背景音乐/噪声音源的可选高质量路径。

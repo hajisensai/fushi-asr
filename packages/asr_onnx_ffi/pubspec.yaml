@@ -1,5 +1,5 @@
-name: asr_onnx_ffi
-description: ONNX Runtime backend for asr_core via dart:ffi (CPU, DirectML, CUDA).
+name: fushi_asr_onnx_ffi
+description: ONNX Runtime backend for fushi_asr_core via dart:ffi (CPU, DirectML, CUDA).
 version: 0.1.0
 publish_to: none
 resolution: workspace
@@ -9,7 +9,7 @@ environment:
 
 dependencies:
   crypto: ^3.0.0
-  asr_core: ^0.1.0
+  fushi_asr_core: ^0.1.0
   ffi: ^2.1.0
   meta: ^1.15.0
   path: ^1.9.0

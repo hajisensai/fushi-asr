@@ -31,7 +31,7 @@ library;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 class AsrFbank {
   const AsrFbank();

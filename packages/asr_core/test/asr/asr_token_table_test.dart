@@ -1,5 +1,5 @@
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 /// 字符级词表（ReazonSpeech 形态：`<token>\t<id>`）。
 const String _kCharTokens =

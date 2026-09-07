@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:archive/archive.dart';
-import 'package:asr_align/asr_align.dart';
+import 'package:fushi_asr_align/asr_align.dart';
 import 'package:test/test.dart';
 
 List<int> makeEpub({String? opf, Map<String, String>? chapters}) {

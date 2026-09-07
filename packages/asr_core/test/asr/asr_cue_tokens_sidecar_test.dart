@@ -1,10 +1,10 @@
 import 'dart:io';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_cue_builder.dart';
-import 'package:asr_core/src/asr/asr_transcribe_job.dart';
-import 'package:asr_core/src/asr/asr_transcription_service.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_cue_builder.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_job.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcription_service.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 import 'package:path/path.dart' as p;
 
 AsrTranscribedSegment _seg({

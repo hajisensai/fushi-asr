@@ -20,7 +20,7 @@ library;
 import 'dart:convert';
 
 import 'package:meta/meta.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
 
 /// ASR 产物喂给 Dice 匹配器时建议的相似度阈值。
 ///

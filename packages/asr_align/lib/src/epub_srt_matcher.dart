@@ -1,4 +1,4 @@
-import 'package:asr_core/asr_core.dart' show asrLog;
+import 'package:fushi_asr_core/asr_core.dart' show asrLog;
 import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:meta/meta.dart';

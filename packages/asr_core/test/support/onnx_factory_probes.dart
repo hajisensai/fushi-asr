@@ -9,7 +9,7 @@
 /// 值的用例自己覆写。
 library;
 
-import 'package:asr_core/asr_core.dart';
+import 'package:fushi_asr_core/asr_core.dart';
 
 mixin FakeOnnxFactoryProbes {
   Future<Set<OnnxExecutionProvider>> availableAcceleratedProviders() async =>

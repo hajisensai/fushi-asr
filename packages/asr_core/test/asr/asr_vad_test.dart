@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/asr/asr_vad.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_vad.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 const int kWin = kAsrVadWindowSamples;
 const int kRate = kAsrSampleRate;

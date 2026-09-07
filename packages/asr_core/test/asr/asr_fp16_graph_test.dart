@@ -2,8 +2,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_fp16_graph.dart';
-import 'package:asr_core/src/onnx/onnx_proto.dart';
+import 'package:fushi_asr_core/src/asr/asr_fp16_graph.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_proto.dart';
 
 /// `convertAsrModelToFp16` 的结构测试：手拼一个带 initializer / Constant /
 /// Cast(to=float) / If 子图（引用外层输入）的极小模型，断言全图统一 fp16、主图

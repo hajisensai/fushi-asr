@@ -4,8 +4,8 @@ library;
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:asr_core/asr_core.dart';
-import 'package:asr_onnx_ffi/asr_onnx_ffi.dart';
+import 'package:fushi_asr_core/asr_core.dart';
+import 'package:fushi_asr_onnx_ffi/asr_onnx_ffi.dart';
 import 'package:test/test.dart';
 
 /// 这组用例要真的 onnxruntime 动态库。

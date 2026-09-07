@@ -43,9 +43,9 @@ import 'dart:math' as math;
 
 import 'dart:typed_data';
 import 'package:meta/meta.dart';
-import 'package:asr_core/src/util/log.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/ffmpeg/ffmpeg_backend.dart';
+import 'package:fushi_asr_core/src/util/log.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/ffmpeg/ffmpeg_backend.dart';
 
 /// 输入端 `-ss` 的预滚秒数：粗跳到目标前这么多秒，让 mp3 bit reservoir / AAC 重叠加窗
 /// 有足够上文热身，再由输出端 `-ss` 精确裁掉。实测 mp3 需 ≥ 1 帧（26 ms）+ 解码延迟，

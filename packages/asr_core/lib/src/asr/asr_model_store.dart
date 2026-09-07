@@ -10,10 +10,10 @@ import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/onnx/model_file_downloader.dart';
-import 'package:asr_core/src/util/asr_paths.dart';
-import 'package:asr_core/src/util/directory_bytes.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/onnx/model_file_downloader.dart';
+import 'package:fushi_asr_core/src/util/asr_paths.dart';
+import 'package:fushi_asr_core/src/util/directory_bytes.dart';
 
 /// 贪心 Loop 图的拼装器签名（见 `asr_greedy_graph.dart` 的 `buildAsrGreedyGraph`）。
 typedef AsrGreedyGraphBuilder =

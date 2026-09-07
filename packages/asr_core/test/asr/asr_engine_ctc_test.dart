@@ -1,14 +1,14 @@
 import 'dart:io';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_ctc_decoder.dart';
-import 'package:asr_core/src/asr/asr_encoder_buckets.dart';
-import 'package:asr_core/src/asr/asr_engine.dart';
-import 'package:asr_core/src/asr/asr_model_manifest.dart';
-import 'package:asr_core/src/asr/asr_model_store.dart';
-import 'package:asr_core/src/asr/asr_transducer_decoder.dart';
-import 'package:asr_core/src/asr/asr_vad.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_ctc_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_encoder_buckets.dart';
+import 'package:fushi_asr_core/src/asr/asr_engine.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
+import 'package:fushi_asr_core/src/asr/asr_model_store.dart';
+import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart';
+import 'package:fushi_asr_core/src/asr/asr_vad.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 import 'package:path/path.dart' as p;
 
 /// CTC（Omnilingual）包的引擎装载：只建模型 + VAD 两个会话，词表 blank 取

@@ -2,9 +2,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_greedy_graph.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/onnx/onnx_proto.dart';
+import 'package:fushi_asr_core/src/asr/asr_greedy_graph.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_proto.dart';
 
 /// `buildAsrGreedyGraph` 的结构测试：用 `fixtures/gen_greedy_fixtures.py` 生成的极小
 /// 合成 decoder/joiner（IO 与真模型同构）拼图，断言 IO、Loop、前缀化内联与拒绝路径。

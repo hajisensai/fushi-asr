@@ -22,7 +22,7 @@ import 'dart:collection';
 import 'dart:developer' as developer;
 
 import 'package:meta/meta.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 /// 编码器输入的符号维度名（两个模型包的导出都是 `x[N, T, 80]`，已核实）。
 const String kAsrEncoderBatchDim = 'N';

@@ -2,9 +2,9 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/asr/asr_vad.dart';
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_vad.dart';
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 /// 合成信号：按 [segments] 依次拼接 (秒数, 幅度) 的正弦/静音，叠加 [noise] 幅度的
 /// 确定性伪随机白噪声。

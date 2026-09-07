@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:asr/asr.dart';
+import 'package:fushi_asr/asr.dart';
 import 'package:test/test.dart';
 
 String _quote(String value) => "'${value.replaceAll("'", "'\"'\"'")}'";

@@ -1,4 +1,4 @@
-name: asr_align
+name: fushi_asr_align
 description: EPUB and text to audio alignment - sentence matching, anchor gap filling, cue resegmentation.
 version: 0.1.0
 publish_to: none
@@ -8,7 +8,7 @@ environment:
   sdk: ">=3.6.0 <4.0.0"
 
 dependencies:
-  asr_core: ^0.1.0
+  fushi_asr_core: ^0.1.0
   meta: ^1.15.0
   archive: ^4.0.0
   html: ^0.15.0

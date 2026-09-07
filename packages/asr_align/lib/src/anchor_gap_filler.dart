@@ -1,4 +1,4 @@
-import 'package:asr_core/asr_core.dart' show asrLog;
+import 'package:fushi_asr_core/asr_core.dart' show asrLog;
 import 'dart:math' as math;
 
 import 'package:meta/meta.dart';

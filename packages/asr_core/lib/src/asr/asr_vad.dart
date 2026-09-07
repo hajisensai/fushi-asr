@@ -28,9 +28,9 @@ library;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:asr_core/src/asr/asr_types.dart';
-import 'package:asr_core/src/asr/asr_transcribe_job.dart' show AsrSegmenter;
-import 'package:asr_core/src/onnx/onnx_inference.dart';
+import 'package:fushi_asr_core/src/asr/asr_types.dart';
+import 'package:fushi_asr_core/src/asr/asr_transcribe_job.dart' show AsrSegmenter;
+import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 
 /// 窗口打分器：给一批连续的 512 样本窗口各打一个「是语音」的概率。
 ///
