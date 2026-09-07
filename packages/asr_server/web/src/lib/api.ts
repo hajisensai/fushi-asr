@@ -1,4 +1,5 @@
-import type { Backend, Format, ProgressEvent, Result } from './types';
+import { t } from './i18n.ts';
+import type { Backend, Format, ProgressEvent, Result } from './types.ts';
 export function auth(token: string): Record<string, string> { return token.trim() ? { Authorization: 'Bearer ' + token.trim() } : {}; }
 export class TranscriptionTask {
   readonly controller = new AbortController();
@@ -11,7 +12,7 @@ export class TranscriptionTask {
   constructor(token: string) {
     this.token = token;
     this.id = fetch('v1/jobs', { method: 'POST', headers: auth(token) }).then(async r => {
-      if (!r.ok) throw new Error('创建任务失败：HTTP ' + r.status);
+      if (!r.ok) throw new Error(t('error.createJob', { status: r.status }));
       return (await r.json()).jobId as string;
     });
   }
@@ -21,7 +22,7 @@ export class TranscriptionTask {
     if (this.pendingStop) return this.pendingStop;
     this.pendingStop = this.id.then(async id => {
       const r = await fetch(`v1/jobs/${id}/cancel`, { method: 'POST', headers: auth(this.token) });
-      if (!r.ok) throw new Error('终止请求失败：HTTP ' + r.status);
+      if (!r.ok) throw new Error(t('error.stopRequest', { status: r.status }));
       await r.json(); // The server acknowledges only after releasing the slot.
     }, () => { /* No ID: audio was never submitted. */ })
       .then(() => this.acknowledge()).finally(() => { this.pendingStop = null; });
@@ -29,15 +30,15 @@ export class TranscriptionTask {
   }
 }
 export async function readEvents(response: Response, onProgress: (e: ProgressEvent) => void): Promise<Result> {
-  if (!response.ok) throw new Error('HTTP ' + response.status + ' ' + await response.text());
-  if (!response.body) throw new Error('服务端没有返回数据流');
+  if (!response.ok) throw new Error(t('error.http', { status: response.status, body: await response.text() }));
+  if (!response.body) throw new Error(t('error.noStream'));
   const reader = response.body.getReader(), decoder = new TextDecoder();
   let buffer = '', result: Result | null = null;
   function line(value: string) {
     if (!value.trim()) return;
     const ev = JSON.parse(value) as ProgressEvent;
-    if (ev.phase === 'error') throw new Error(ev.error || '生成失败');
-    if (ev.phase === 'cancelled') throw new DOMException('任务已终止', 'AbortError');
+    if (ev.phase === 'error') throw new Error(ev.error || t('error.generate'));
+    if (ev.phase === 'cancelled') throw new DOMException(t('error.aborted'), 'AbortError');
     if (ev.phase === 'result') { result = ev as Result; return; }
     onProgress(ev);
   }
@@ -48,7 +49,7 @@ export async function readEvents(response: Response, onProgress: (e: ProgressEve
       const lines = buffer.split('\n'); buffer = lines.pop()!; lines.forEach(line);
     }
     line(buffer + decoder.decode());
-    if (!result) throw new Error('连接结束但没有收到结果');
+    if (!result) throw new Error(t('error.noResult'));
     return result;
   } finally { await reader.cancel(); }
 }
@@ -60,7 +61,7 @@ export async function retime(backend: Backend, file: File, subtitle: File, langu
 }
 async function submit(endpoint: 'transcribe' | 'retime', backend: Backend, file: File, reference: { field: 'epub' | 'subtitle'; file: File } | null, language: string, format: Format, token: string, onProgress: (e: ProgressEvent) => void, task: TranscriptionTask) {
   const jobId = await task.id;
-  if (task.stopRequested) throw new DOMException('任务已终止', 'AbortError');
+  if (task.stopRequested) throw new DOMException(t('error.aborted'), 'AbortError');
   const query = new URLSearchParams({ language, format, engine: backend.id, filename: file.name, jobId });
   let body: File | FormData = file;
   if (reference) { body = new FormData(); body.append(reference.field, reference.file); body.append('audio', file); }

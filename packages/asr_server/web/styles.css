@@ -1,58 +1,265 @@
+/*
+ * 字幕工作台的样式。设计语言直接取自官网 hajisensai/fushi.moe 的 public/chrome.css：
+ * 同一套 Apple 语法 token、同一个顶栏/底栏形状、同一套排版尺度。工作台不是官网的
+ * 一个页面（它跑在本机服务端、离线打包成单文件），所以 CSS 是抄过来的而不是引过来的；
+ * 官网改了 token，这里跟着改。
+ *
+ * shadcn 组件读的是 --background/--foreground/--primary 那一套变量名，因此下面把官网
+ * token 映射到那些名字上，组件就自动变成官网的配色，不用逐个改组件源文件。
+ */
 @import "tailwindcss" source(none);
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @source "./src";
 @custom-variant dark (&:is(.dark *));
+
 @theme inline {
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans", sans-serif;
-  --font-heading: var(--font-sans);
+  --font-sans: var(--sans);
+  --font-heading: var(--sans);
   --color-background: var(--background); --color-foreground: var(--foreground);
-  --color-card: var(--background); --color-card-foreground: var(--foreground);
-  --color-popover: var(--background); --color-popover-foreground: var(--foreground);
-  --color-primary: var(--foreground); --color-primary-foreground: var(--background);
+  --color-card: var(--card); --color-card-foreground: var(--foreground);
+  --color-popover: var(--card); --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--muted); --color-secondary-foreground: var(--foreground);
   --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--muted); --color-accent-foreground: var(--foreground);
-  --color-destructive: var(--destructive); --color-border: var(--border); --color-input: var(--border); --color-ring: var(--muted-foreground);
-  --radius-sm: calc(var(--radius) * .6); --radius-md: calc(var(--radius) * .8); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) * 1.4);
+  --color-destructive: var(--destructive); --color-border: var(--border); --color-input: var(--border); --color-ring: var(--primary);
+  --radius-sm: calc(var(--radius) * .5); --radius-md: calc(var(--radius) * .7); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) * 1.3);
 }
-:root { color-scheme: light; --background: #fff; --foreground: #171717; --muted: #f7f7f7; --muted-foreground: #737373; --border: #e5e5e5; --destructive: #a12d2d; --radius: .5rem; }
-.dark { color-scheme: dark; --background: #171717; --foreground: #f5f5f5; --muted: #252525; --muted-foreground: #a3a3a3; --border: #3a3a3a; --destructive: #f4a6a6; }
+
+/* ============ 官网 token（apple.com.cn/environment 实测值，见 fushi.moe/public/chrome.css） ============ */
+:root {
+  color-scheme: light;
+  --ground: #fff;
+  --alt: #f5f5f7;
+  --ink: #1d1d1f;
+  --ink-2: #6e6e73;
+  --hairline: #d2d2d7;
+  --link: #0071e3;
+  --link-ink: #fff;
+  --accent: #5856d6;
+  --card-shadow: 0 20px 44px rgba(0, 0, 0, .08);
+  --sans: "SF Pro Display", "SF Pro SC", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+  /* 顶栏高度：锚点 scroll-margin、窄屏下拉面板的起点都按它让位。 */
+  --nav-h: 52px;
+
+  --background: var(--ground); --foreground: var(--ink);
+  --card: #fff;
+  --muted: var(--alt); --muted-foreground: var(--ink-2);
+  --border: var(--hairline);
+  --primary: var(--link); --primary-foreground: var(--link-ink);
+  --destructive: #b3261e;
+  --radius: .875rem;
+}
+/* 官网当前强制亮色，工作台保留深色开关（长任务常在夜里跑）。深色取官网的
+   深色带 token（--band-*），配色仍是同一套，不另发明一组灰。 */
+.dark {
+  color-scheme: dark;
+  --ground: #000;
+  --alt: #161617;
+  --ink: #f5f5f7;
+  --ink-2: #86868b;
+  --hairline: #2d2d2f;
+  --link: #2997ff;
+  --accent: #7d7aff;
+  --card-shadow: 0 20px 44px rgba(0, 0, 0, .55);
+  --card: #1d1d1f;
+  --destructive: #ff6961;
+}
+
 @layer base {
   * { @apply border-border; }
-  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
-  body { @apply bg-background text-foreground font-sans text-sm antialiased; margin: 0; line-height: 1.6; }
+  /* 这里**不能**抄官网的 scrollbar-gutter: stable。官网锁背景滚动是自己的 JS 干的，
+     它只加 body{overflow:hidden}、不补宽度，所以要靠常驻槽位把宽度稳住；工作台的下拉
+     是 Radix，它锁滚动时会自己把撤掉的滚动条宽度补回来。两边都补 = 补两次，下拉一开
+     顶栏右边缘就缩 15px，右侧那排控件跳一下（实测 1440px 下 navRight 1425 → 1410）。 */
+  html { scroll-behavior: smooth; scroll-padding-top: calc(var(--nav-h) + 24px); }
+  body {
+    @apply bg-background text-foreground font-sans text-sm antialiased;
+    margin: 0; line-height: 1.47;
+  }
+  :target { scroll-margin-top: calc(var(--nav-h) + 12px); }
   button:not(:disabled), [role="button"]:not([disabled]) { cursor: pointer; }
   :focus-visible { outline-offset: 3px; }
 }
+
 @layer components {
-  .topbar { @apply flex items-center justify-between gap-2 h-16 px-3 sm:px-6 border-b; }
-  .workspace-layout { @apply md:grid md:grid-cols-[200px_minmax(0,1fr)]; min-height: calc(100dvh - 4rem); }
-  .workspace-sidebar { @apply hidden md:flex flex-col border-r p-4 pt-9; }
-  .workspace { @apply w-full min-w-0 max-w-5xl mx-auto px-5 sm:px-10 pt-9 pb-12; }
-  .section-title { @apply text-base font-semibold; }
-  .note { @apply text-xs text-muted-foreground; overflow-wrap: anywhere; }
+  /* ---------------- 官网排版尺度 ---------------- */
+  /* 官网 .h-hero 是 clamp(44px,5.3vw,64px)；工作台首屏下面紧接着就是操作区，
+     压一档到 48px，字重与字距保持不变。 */
+  .h-page { font-size: clamp(32px, 4vw, 48px); font-weight: 600; line-height: 1.06; letter-spacing: -.003em; text-wrap: balance; }
+  /* 分节大标题（源文件 / 处理结果）。小标题用 .h-sub，别拿 .h-section 当行内标题使。 */
+  .h-section { font-size: clamp(23px, 2.6vw, 32px); font-weight: 600; line-height: 1.09; letter-spacing: -.003em; text-wrap: balance; }
+  .h-sub { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+  .eyebrow { font-size: clamp(15px, 1.6vw, 17px); font-weight: 600; line-height: 1.19; letter-spacing: .011em; color: var(--accent); }
+  .copy { font-size: clamp(16px, 1.8vw, 19px); line-height: 1.4762; color: var(--ink); }
+  .copy-2 { color: var(--ink-2); }
+  .note { @apply text-xs; color: var(--ink-2); line-height: 1.5; overflow-wrap: anywhere; }
+
+  /* 与 .site-nav 用同一条内边距——顶栏和内容列必须落在同一条竖线上。
+     不要再叠 max-width + margin auto：那等于收两次边，内容会比顶栏多缩进一截。 */
+  .shell { padding-inline: max(22px, calc(50vw - 540px)); }
+  .band { background: var(--alt); }
+  .section { padding-block: clamp(38px, 5vw, 64px); }
+  .hero { padding-block: clamp(40px, 5.5vw, 78px) clamp(30px, 4vw, 52px); }
+  /* 官网的卡片面：白面 + 大圆角 + 柔投影。深色下投影几乎看不见，靠发丝边撑出边界。 */
+  .panel { background: var(--card); border: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent); border-radius: 22px; padding: clamp(20px, 2.4vw, 30px); box-shadow: var(--card-shadow); }
+
   .metric-value { @apply text-[26px] font-medium tabular-nums tracking-tight mt-1 leading-tight; }
-  .steps { @apply flex items-center my-4 text-xs text-muted-foreground; }
+  .steps { @apply flex items-center my-4 text-xs; color: var(--ink-2); }
   .steps li { @apply flex items-center gap-2; flex: 1; white-space: nowrap; }
-  .steps li::before { content: ''; width: 9px; height: 9px; border: 1px solid var(--muted-foreground); border-radius: 50%; flex-shrink: 0; }
+  .steps li::before { content: ''; width: 9px; height: 9px; border: 1px solid var(--ink-2); border-radius: 50%; flex-shrink: 0; }
   .steps li:not(:last-child)::after { content: ''; height: 1px; background: var(--border); margin: 0 10px 0 2px; flex: 1; }
   .steps li:last-child { flex: 0; }
-  .steps li.current { color: var(--foreground); font-weight: 600; }
-  .steps li.current::before, .steps li.finished::before { background: var(--foreground); border-color: var(--foreground); }
+  .steps li.current { color: var(--ink); font-weight: 600; }
+  .steps li.current::before, .steps li.finished::before { background: var(--link); border-color: var(--link); }
   .steps li.skipped { opacity: .3; }
   .result:only-child { grid-column: 1 / -1; }
-  .skip-link { @apply fixed left-4 p-2 bg-background; top: -100px; }
+  .skip-link { @apply fixed left-4 p-2 bg-background z-[700] rounded-lg; top: -100px; }
   .skip-link:focus { top: 8px; }
+
+  /* ---------------- 顶栏（形状同官网 .site-nav） ---------------- */
+  .site-nav {
+    position: sticky; top: 0; z-index: 500;
+    display: flex; justify-content: space-between; align-items: center;
+    height: var(--nav-h); padding: 0 max(22px, calc(50vw - 540px));
+    background: color-mix(in srgb, var(--ground) 80%, transparent);
+    backdrop-filter: saturate(1.8) blur(20px);
+    -webkit-backdrop-filter: saturate(1.8) blur(20px);
+    border-bottom: 1px solid color-mix(in srgb, var(--hairline) 60%, transparent);
+  }
+  .site-nav-brand { font-size: 21px; font-weight: 600; letter-spacing: -.01em; display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .site-nav-brand .sub { font-size: 12px; font-weight: 400; color: var(--ink-2); letter-spacing: 0; }
+  .site-nav-right { display: flex; align-items: center; gap: 14px; }
+
+  /* 模式开关：药丸分段控件。整个顶栏里只有它是「选一个」的语义，所以给它一条槽底 +
+     一块填色的当前段——文字链做不到这件事，用户会当成社区入口而略过。 */
+  .site-nav-modes {
+    display: flex; align-items: center; gap: 2px; flex: none;
+    padding: 2px; border-radius: 980px;
+    background: var(--alt);
+    border: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent);
+  }
+  .site-nav-modes button {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: none; border: 0; margin: 0; padding: 4px 12px;
+    border-radius: 980px; font: inherit; font-size: 12px; color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .site-nav-modes button:hover:not(:disabled):not([aria-current="page"]) { color: var(--ink); }
+  /* 当前段用 --card 而不是 --ground：深色下 --ground 是纯黑，比槽底还暗，填色反而看不出来。 */
+  .site-nav-modes button[aria-current="page"] {
+    background: var(--card); color: var(--ink); font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .09);
+  }
+  .site-nav-modes button:disabled { opacity: .5; cursor: default; }
+  .site-nav-modes button:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+  .site-nav-modes svg { width: 15px; height: 15px; display: block; flex: none; }
+
+  .logo { width: var(--logo-size, 26px); height: var(--logo-size, 26px); flex: none; display: block; }
+
+  /* 官网 CTA：药丸按钮。顶栏里那颗是墨色小号，页面里是蓝色大号。 */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--link); color: var(--link-ink);
+    border: 0; font: inherit; font-size: 17px; line-height: 1.17;
+    padding: 12px 24px; border-radius: 980px; white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { filter: brightness(1.07); }
+  .btn:disabled { opacity: .45; }
+  .site-nav .btn { background: var(--ink); color: var(--ground); font-size: 12px; padding: 5px 12px; }
+  .site-nav .btn:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 84%, var(--ground)); filter: none; }
+  .site-nav .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border: 0; border-radius: 50%;
+    background: none; color: var(--ink); flex: none;
+  }
+  .icon-btn:hover { background: var(--alt); color: var(--link); }
+  .icon-btn svg { width: 16px; height: 16px; display: block; }
+
+  /* 窄屏收起模式的文字、只留图标（保留可访问名给屏读器），两个模式仍然直接可见。
+     阈值按最长的那几种语言实测定：德/印尼/俄语的标签比中日文长得多。 */
+  @media (max-width: 620px) { .site-nav-brand .sub { display: none; } }
+  @media (max-width: 1000px) {
+    .site-nav-modes .word {
+      position: absolute; width: 1px; height: 1px;
+      overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+    }
+    .site-nav-modes button { padding: 5px 9px; }
+  }
+
+  /* ---------------- 语言菜单（形状同官网 .site-nav-lang） ---------------- */
+  .site-nav-lang { position: relative; }
+  .site-nav-lang-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: none; border: 0; margin: 0; padding: 4px 0;
+    font: inherit; font-size: 12px; color: var(--ink); white-space: nowrap;
+  }
+  .site-nav-lang-btn:hover, .site-nav-lang-btn[aria-expanded="true"] { color: var(--link); }
+  .site-nav-lang-btn > svg { width: 17px; height: 17px; display: block; flex: none; }
+  .site-nav-lang-btn > svg.chev { width: 12px; height: 12px; transition: transform .18s ease; }
+  .site-nav-lang-btn[aria-expanded="true"] > svg.chev { transform: rotate(180deg); }
+  .site-nav-lang-menu {
+    position: absolute; inset-inline-end: 0; top: calc(100% + 12px); z-index: 600;
+    margin: 0; padding: 6px; list-style: none;
+    min-width: 210px; max-height: min(70vh, 520px); overflow-y: auto;
+    background: var(--ground); border: 1px solid var(--hairline);
+    border-radius: 14px; box-shadow: var(--card-shadow);
+  }
+  .site-nav-lang-menu button {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    width: 100%; padding: 8px 12px; border: 0; border-radius: 9px;
+    background: none; font: inherit; font-size: 14px; color: var(--ink); text-align: start;
+  }
+  .site-nav-lang-menu button:hover { background: var(--alt); }
+  .site-nav-lang-menu button.on { color: var(--link); font-weight: 600; }
+  .site-nav-lang-menu button.on::after { content: "\2713"; font-weight: 600; }
+  .site-nav-lang-sub { font-size: 12px; font-weight: 400; color: var(--ink-2); margin-inline-start: auto; }
+  .site-nav-lang-menu button.on .site-nav-lang-sub { color: var(--link); }
+  @media (max-width: 860px) {
+    .site-nav-lang-current { display: none; }
+    .site-nav-lang-menu { inset-inline-end: -8px; top: calc(var(--nav-h) / 2 + 22px); }
+  }
+
+  /* ---------------- 底栏 / 回到顶部（形状同官网） ---------------- */
+  .site-footer {
+    border-top: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent);
+    padding: 34px 22px 40px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    font-size: 12px; line-height: 1.5; color: var(--ink-2); text-align: center;
+  }
+  .site-footer a:hover { color: var(--link); }
+  .site-footer-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px; color: var(--ink); }
+  .site-footer-legal a { text-decoration: underline; text-underline-offset: 3px; }
+  .site-totop {
+    position: fixed; inset-inline-end: 22px; bottom: 22px; z-index: 450;
+    width: 40px; height: 40px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--hairline) 70%, transparent);
+    display: grid; place-items: center; color: var(--ink);
+    background: color-mix(in srgb, var(--ground) 88%, transparent);
+    backdrop-filter: saturate(1.8) blur(20px); -webkit-backdrop-filter: saturate(1.8) blur(20px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+    opacity: 0; visibility: hidden; transform: translateY(10px);
+    transition: opacity .22s ease, transform .22s ease, visibility .22s;
+  }
+  .site-totop.show { opacity: 1; visibility: visible; transform: none; }
+  .site-totop:hover { color: var(--link); }
+  .site-totop svg { width: 18px; height: 18px; display: block; }
 }
-/* Flat design tokens and component states, shared by all component instances. */
-[data-slot="select-content"], [data-slot="sheet-content"] { box-shadow: none; }
-[data-slot="sheet-overlay"] { backdrop-filter: none; }
-[data-slot="textarea"] { field-sizing: fixed; font: 12px/1.8 ui-monospace, Menlo, monospace; background: var(--muted); }
+
+/* shadcn 组件对齐官网观感：按钮是药丸，弹层不投硬阴影。拖放区是个大方块，
+   药丸化会把它拉成胶囊，所以按类名排除。 */
+[data-slot="button"]:not(.drop-target) { border-radius: 980px; }
+[data-slot="button"][data-variant="default"] { font-weight: 500; }
+[data-slot="select-trigger"], [data-slot="input"] { border-radius: 12px; }
+[data-slot="select-content"], [data-slot="popover-content"] { border-radius: 14px; box-shadow: var(--card-shadow); }
+[data-slot="textarea"] { field-sizing: fixed; font: 12px/1.8 ui-monospace, Menlo, monospace; background: var(--alt); border-radius: 14px; }
+[data-slot="progress"] { height: 6px; }
 [data-slot="progress"][data-state="indeterminate"] { animation: breathe 1.4s ease-in-out infinite alternate; }
 [data-slot="progress"][data-state="indeterminate"] [data-slot="progress-indicator"] { transform: none !important; opacity: .25; }
-.drop-target[data-dragging="true"] { outline: 2px solid var(--foreground); outline-offset: 3px; background: var(--muted); }
-.drop-target span > span:last-child { font-size: 12px; color: var(--muted-foreground); font-weight: 400; }
+.drop-target { border-radius: 18px; background: var(--card); }
+.drop-target[data-dragging="true"] { outline: 2px solid var(--link); outline-offset: 3px; background: var(--alt); }
+.drop-target span > span:last-child { font-size: 12px; color: var(--ink-2); font-weight: 400; }
 @keyframes breathe { from { opacity: .3; } to { opacity: .8; } }
 @media (max-width: 639px) { .steps { font-size: 10px; } .steps li { gap: 4px; } .steps li:not(:last-child)::after { margin: 0 5px 0 0; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }
