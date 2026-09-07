@@ -1,0 +1,17 @@
+name: asr_core
+description: 纯 Dart 语音识别转录核心：VAD 分段、fbank、zipformer RNN-T / CTC 解码、攒批分桶、字幕产出。
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+
+dependencies:
+  crypto: ^3.0.3
+  meta: ^1.15.0
+  path: ^1.9.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0
