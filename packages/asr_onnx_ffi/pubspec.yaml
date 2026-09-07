@@ -1,5 +1,5 @@
 name: asr_onnx_ffi
-description: ONNX Runtime backend for asr_core via dart:ffi (CPU / DirectML / CUDA).
+description: ONNX Runtime backend for asr_core via dart:ffi (CPU, DirectML, CUDA).
 version: 0.1.0
 publish_to: none
 resolution: workspace

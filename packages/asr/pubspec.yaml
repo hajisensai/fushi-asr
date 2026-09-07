@@ -1,5 +1,5 @@
 name: asr
-description: Speech recognition to subtitles: core plus ONNX runtime backend and subtitle formats.
+description: Speech recognition to subtitles - core plus ONNX runtime backend and subtitle formats.
 version: 0.1.0
 publish_to: none
 resolution: workspace

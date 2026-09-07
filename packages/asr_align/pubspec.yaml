@@ -1,5 +1,5 @@
 name: asr_align
-description: EPUB / text to audio alignment: sentence matching, anchor gap filling, cue resegmentation.
+description: EPUB and text to audio alignment - sentence matching, anchor gap filling, cue resegmentation.
 version: 0.1.0
 publish_to: none
 resolution: workspace

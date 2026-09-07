@@ -1,5 +1,5 @@
 name: asr_cli
-description: asr command line: transcribe / models / serve.
+description: asr command line - transcribe, models, serve.
 version: 0.1.0
 publish_to: none
 resolution: workspace
