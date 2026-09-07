@@ -1,5 +1,5 @@
 name: asr
-description: 语音识别生成字幕的门面包：核心 + FFI 后端 + 一步到位的转录器与字幕格式。
+description: Speech recognition to subtitles: core plus ONNX runtime backend and subtitle formats.
 version: 0.1.0
 publish_to: none
 resolution: workspace

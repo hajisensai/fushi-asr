@@ -1,5 +1,5 @@
 name: asr_onnx_ffi
-description: asr_core 的纯 Dart ONNX Runtime 后端（dart:ffi），给 CLI 与服务端用。
+description: ONNX Runtime backend for asr_core via dart:ffi (CPU / DirectML / CUDA).
 version: 0.1.0
 publish_to: none
 resolution: workspace
