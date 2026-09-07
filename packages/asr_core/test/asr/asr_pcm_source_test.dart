@@ -17,11 +17,15 @@ class _Scripted {
     this.bytes = const <int>[],
     this.returnCode = 0,
     this.output = '',
+    this.durationSampleDeficit,
   });
 
   final List<int>? bytes;
   final int? returnCode;
   final String output;
+
+  /// 模拟容器时间基舍入：最多写出 `-t` 对应样本数减去该值（仅裸 PCM）。
+  final int? durationSampleDeficit;
 }
 
 /// 记录参数、按脚本逐次响应的 fake [FfmpegBackend]。脚本用尽后返回「exit 0、空文件」
@@ -60,7 +64,16 @@ class _FakeFfmpegBackend implements FfmpegBackend {
     }
     final List<int>? bytes = step.bytes;
     if (bytes != null) {
-      await File(args.last).writeAsBytes(bytes, flush: true);
+      final int? deficit = step.durationSampleDeficit;
+      final List<int> output;
+      if (deficit == null) {
+        output = bytes;
+      } else {
+        final double seconds = double.parse(args[args.indexOf('-t') + 1]);
+        output = bytes.take(((seconds * kAsrSampleRate).round() - deficit) * 2)
+            .toList();
+      }
+      await File(args.last).writeAsBytes(output, flush: true);
     }
     active--;
     return FfmpegRunResult(
@@ -514,15 +527,15 @@ void main() {
       final List<String> a3 = backend.calls[3];
       final int i = a3.indexOf('-i');
       expect(a3.sublist(i - 2, i), <String>['-ss', '1.000']);
-      expect(a3.sublist(i + 2, i + 6), <String>['-ss', '2.000', '-t', '1.000']);
+      expect(a3.sublist(i + 2, i + 6), <String>['-ss', '2.000', '-t', '1.010']);
       expect(source.resolvedContainer, AsrPcmContainer.s16le);
       expect(backend.timeouts.first, const Duration(seconds: 60));
       expect(leftovers(), isEmpty, reason: '临时目录须清理');
     });
 
-    test('startSample 非整毫秒：向下取整寻址、多要 1 ms、丢头截尾后边界仍精确', () async {
-      // 37 = 2 ms（32 样本）+ 5 样本。ffmpeg 会从样本 32 起给 1.001 s = 16016 个样本。
-      final List<int> ramp = List<int>.generate(16016, (int i) => 32 + i);
+    test('startSample 非整毫秒：向下取整寻址、保留余量、丢头截尾后边界仍精确', () async {
+      // 37 = 2 ms（32 样本）+ 5 样本。1 ms 对齐余量 + 10 ms 解码尾部余量。
+      final List<int> ramp = List<int>.generate(16176, (int i) => 32 + i);
       final _FakeFfmpegBackend backend = _FakeFfmpegBackend(<_Scripted>[
         _Scripted(bytes: _s16le(ramp)),
         _Scripted(bytes: _s16le(List<int>.filled(3, 9))), // 尾块只剩 3 个（≤ 丢头数）
@@ -548,7 +561,7 @@ void main() {
         '-ss',
         '0.002',
         '-t',
-        '1.001',
+        '1.011',
       ]);
       final List<String> a1 = backend.calls[1];
       final int i1 = a1.indexOf('-i');
@@ -557,8 +570,94 @@ void main() {
         '-ss',
         '1.002',
         '-t',
-        '1.001',
+        '1.011',
       ]);
+    });
+
+    test('时间戳让每块少 5 样本：解码尾部余量补足真实样本，绝对起点和内容保持连续', () async {
+      final _FakeFfmpegBackend backend = _FakeFfmpegBackend(<_Scripted>[
+        for (int block = 0; block < 3; block++)
+          _Scripted(
+            bytes: _s16le(List<int>.generate(
+              16160,
+              (int i) => (block * 16000 + i) % 30000,
+            )),
+            durationSampleDeficit: 5,
+          ),
+        _Scripted(bytes: _s16le(List<int>.generate(
+          4000,
+          (int i) => (48000 + i) % 30000,
+        ))),
+        const _Scripted(),
+      ]);
+      final FfmpegAsrPcmSource source = FfmpegAsrPcmSource(
+        backend: backend,
+        tempDir: tempRoot,
+        parallelism: 3,
+      );
+      final Float32List got = await _collect(
+        source.decode(input.path, chunkSeconds: 1),
+        expectedStart: 0,
+        chunkSamples: 16000,
+      );
+      expect(got, hasLength(52000));
+      for (int i = 0; i < got.length; i++) {
+        expect(got[i] * 32768, i % 30000, reason: '样本 $i 不应补零、跳过或重复');
+      }
+      expect(leftovers(), isEmpty);
+    });
+
+    test('超过余量的内部短块：明确报解码缺口，不平移后续音频或填静音', () async {
+      final _FakeFfmpegBackend backend = _FakeFfmpegBackend(<_Scripted>[
+        _Scripted(bytes: _s16le(List<int>.filled(15995, 1))),
+        _Scripted(bytes: _s16le(List<int>.filled(16000, 2))),
+      ]);
+      final FfmpegAsrPcmSource source = FfmpegAsrPcmSource(
+        backend: backend,
+        tempDir: tempRoot,
+        parallelism: 1,
+      );
+      await expectLater(
+        source.decode(input.path, chunkSeconds: 1).toList(),
+        throwsA(isA<AsrPcmDecodeException>().having(
+          (AsrPcmDecodeException e) => e.message,
+          'message',
+          allOf(contains('short non-final PCM block'), contains('gap=5 samples')),
+        )),
+      );
+      expect(leftovers(), isEmpty);
+    });
+
+    test('最后一块少 5 样本后到 EOF：保留全部尾部样本，不补静音', () async {
+      final _FakeFfmpegBackend backend = _FakeFfmpegBackend(<_Scripted>[
+        _Scripted(bytes: _s16le(List<int>.filled(15995, 7))),
+        const _Scripted(),
+      ]);
+      final FfmpegAsrPcmSource source = FfmpegAsrPcmSource(
+        backend: backend,
+        tempDir: tempRoot,
+        parallelism: 1,
+      );
+      final List<AsrPcmChunk> chunks =
+          await source.decode(input.path, chunkSeconds: 1).toList();
+      expect(chunks, hasLength(1));
+      expect(chunks.single.startSample, 0);
+      expect(chunks.single.samples, hasLength(15995));
+      expect(chunks.single.samples.last * 32768, 7);
+      expect(backend.calls, hasLength(2));
+      expect(leftovers(), isEmpty);
+    });
+
+    test('首块为空：到 EOF，不输出伪造 PCM 块', () async {
+      final _FakeFfmpegBackend backend = _FakeFfmpegBackend(const <_Scripted>[]);
+      final FfmpegAsrPcmSource source = FfmpegAsrPcmSource(
+        backend: backend,
+        tempDir: tempRoot,
+        parallelism: 1,
+      );
+      expect(await source.decode(input.path, chunkSeconds: 1).toList(), isEmpty);
+      expect(backend.calls, hasLength(1));
+      expect(leftovers(), isEmpty);
     });
 
     test('mov 回退：首块 s16le 报 not-known → 切 mov 重跑并缓存', () async {
@@ -685,11 +784,11 @@ void main() {
           isA<AsrPcmDecodeException>().having(
             (AsrPcmDecodeException e) => e.message,
             'message',
-            contains('timed out after 1230s'),
+            contains('timed out after 1232s'),
           ),
         ),
       );
-      expect(backend.timeouts.single, const Duration(seconds: 1230));
+      expect(backend.timeouts.single, const Duration(seconds: 1232));
     });
 
     test('exit 0 但没产出文件 → AsrPcmDecodeException', () async {
@@ -950,6 +1049,7 @@ void main() {
     late String vbrMp3Path;
     late String coveredMp3Path;
     late String m4bPath;
+    late String mkvPath;
 
     Future<void> gen(List<String> args) async {
       final ProcessResult r = await Process.run(ffmpeg!, <String>[
@@ -970,6 +1070,7 @@ void main() {
       vbrMp3Path = '${fixtures.path}${sep}tone_vbr.mp3';
       coveredMp3Path = '${fixtures.path}${sep}tone_cover.mp3';
       m4bPath = '${fixtures.path}${sep}tone.m4b';
+      mkvPath = '${fixtures.path}${sep}tone.mkv';
       final String cover = '${fixtures.path}${sep}cover.png';
       const String sine = 'sine=frequency=440:duration=30';
       await gen(<String>[
@@ -981,6 +1082,12 @@ void main() {
         '-q:a', '5', vbrMp3Path,
       ]);
       await gen(<String>['-f', 'lavfi', '-i', sine, '-c:a', 'aac', m4bPath]);
+      // 复现用户视频的音轨组合：MKV 毫秒时间基、AAC 48 kHz 双声道。
+      await gen(<String>[
+        '-f', 'lavfi', '-i',
+        'sine=frequency=440:sample_rate=48000:duration=30.25',
+        '-ac', '2', '-c:a', 'aac', mkvPath,
+      ]);
       await gen(<String>[
         '-f', 'lavfi', '-i', 'color=red:size=64x64:duration=1', //
         '-frames:v', '1', cover,
@@ -1006,6 +1113,37 @@ void main() {
       );
       expect(await source.probeDurationMs(mp3Path), closeTo(30000, 60));
       expect(await source.probeDurationMs(m4bPath), closeTo(30000, 60));
+    }, skip: skip);
+
+    test('MKV AAC 48 kHz：并行分块连续，尾块保留，文件尾之后为空', () async {
+      final FfmpegAsrPcmSource source = FfmpegAsrPcmSource(
+        backend: _ExecutableFfmpegBackend(ffmpeg!, ffprobe!),
+        tempDir: tempRoot,
+        parallelism: 3,
+      );
+      final Float32List ref = await _decodeWhole(ffmpeg, mkvPath);
+      final Float32List got = await _collect(
+        source.decode(mkvPath, chunkSeconds: 7),
+        expectedStart: 0,
+        chunkSamples: 7 * 16000,
+      );
+      // MKV 寻址使用毫秒时间基，允许文件尾存在 1 ms 内的舍入差异；不能按短块
+      // 累加起点导致时间轴漂移，也不能因最后不足一块而丢掉两秒多的尾部音频。
+      expect(got.length, closeTo(ref.length, kAsrPcmSamplesPerMs));
+      expect(got.length, greaterThan(30 * 16000));
+      expect(got.take(16000), ref.take(16000));
+      for (int start = 0; start < got.length; start += 7 * 16000) {
+        expect(
+          got.skip(start).take(16000).any((double sample) => sample.abs() > .01),
+          isTrue,
+          reason: '块起点 $start 仍需包含真实音频',
+        );
+      }
+      expect(
+        await source.decode(mkvPath, startSample: 35 * 16000).toList(),
+        isEmpty,
+      );
+      expect(leftovers(), isEmpty);
     }, skip: skip);
 
     for (final (String label, String Function() path, int tailLsb, int tail)

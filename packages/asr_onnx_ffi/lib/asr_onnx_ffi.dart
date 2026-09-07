@@ -11,6 +11,8 @@
 /// 动态库解析顺序：`ASR_ONNXRUNTIME_LIB` > 可执行文件同级 > 系统搜索路径。
 library;
 
+export 'src/reusing_onnx_session_factory.dart' show ReusingOnnxSessionFactory;
+
 export 'src/ffi_onnx_session.dart' show FfiOnnxSession;
 export 'src/ffi_onnx_session_factory.dart'
     show FfiOnnxSessionFactory, buildFfiOnnxFactory;

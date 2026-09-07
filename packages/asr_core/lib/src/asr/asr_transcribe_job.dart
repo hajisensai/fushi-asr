@@ -347,10 +347,14 @@ class AsrTranscribeJob {
   final bool usePipeline;
 
   bool _pauseRequested = false;
+  bool _discardPending = false;
   bool _started = false;
 
   /// 请求在下一个检查点暂停（块边界，通常 ≤ chunkSeconds 音频的处理时间）。
-  void requestPause() => _pauseRequested = true;
+  void requestPause({bool discardPending = false}) {
+    _pauseRequested = true;
+    _discardPending = _discardPending || discardPending;
+  }
 
   bool get isPauseRequested => _pauseRequested;
 
@@ -613,7 +617,9 @@ class AsrTranscribeJob {
           (AsrSpeechSegment a, AsrSpeechSegment b) =>
               b.samples.length.compareTo(a.samples.length),
         );
-        while (pending.isNotEmpty && (all || enoughPending())) {
+        while (!(_pauseRequested && _discardPending) &&
+            pending.isNotEmpty &&
+            (all || enoughPending())) {
           final List<AsrSpeechSegment> batch = takeBatch(all: all);
           if (pipeline == null) {
             await commit(batch, await decoder.decodeBatch(batch));
@@ -655,7 +661,7 @@ class AsrTranscribeJob {
           pending.addAll(await segmenter.feed(chunk));
           lastEndSample = chunk.endSample;
           // 块内按批解码并节流发进度。
-          while (enoughPending()) {
+          while (!(_pauseRequested && _discardPending) && enoughPending()) {
             await drain(all: false);
             final DateTime now = DateTime.now();
             if (now.difference(lastProgressAt) >= progressInterval) {
@@ -689,11 +695,18 @@ class AsrTranscribeJob {
           if (_pauseRequested) {
             // 暂停：把半批也冲干净再落检查点，恢复点 = 进行中语音起点，与暂停前
             // 落盘的段一一对应，续跑不重复解码。
-            await drain(all: true);
+            if (_discardPending) {
+              await pipeline?.flush();
+            } else {
+              await drain(all: true);
+            }
             state = _withResume(
               state,
               fileIndex,
-              segmenter.inProgressSpeechStartSample ?? chunk.endSample,
+              _discardPending
+                  ? checkpointSample(
+                      segmenter.inProgressSpeechStartSample ?? chunk.endSample)
+                  : segmenter.inProgressSpeechStartSample ?? chunk.endSample,
             );
             await _writeState(state);
             yield AsrTranscribePausedEvent(

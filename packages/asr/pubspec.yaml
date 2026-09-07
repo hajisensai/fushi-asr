@@ -9,6 +9,7 @@ environment:
 
 dependencies:
   asr_core: ^0.1.0
+  asr_align: ^0.1.0
   asr_onnx_ffi: ^0.1.0
 
 dev_dependencies:

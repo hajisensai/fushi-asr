@@ -16,3 +16,4 @@ export 'src/audio_text_normalizer.dart';
 export 'src/cue_sentence_resegmenter.dart';
 export 'src/epub_cue_matcher.dart';
 export 'src/epub_srt_matcher.dart';
+export 'src/epub_reader.dart';

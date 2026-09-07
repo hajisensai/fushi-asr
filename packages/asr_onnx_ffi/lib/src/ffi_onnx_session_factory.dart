@@ -2,16 +2,21 @@
 library;
 
 import 'dart:developer' as developer;
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:asr_core/asr_core.dart';
 import 'package:ffi/ffi.dart';
+import 'package:crypto/crypto.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:asr_onnx_ffi/src/ffi/onnxruntime_bindings.dart';
 import 'package:asr_onnx_ffi/src/ort_runtime.dart';
 import 'package:asr_onnx_ffi/src/ffi_onnx_session.dart';
+import 'macos_session_tuning.dart';
+import 'coreml_specialization.dart';
 
 /// `OrtDmlApi` 的手写绑定。
 ///
@@ -42,6 +47,8 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
     this.logName = kOnnxLogName,
     this.libraryPathOverride,
     this.deviceId = 0,
+    this.coreMlBasicOptimizations = false,
+    this.coreMlRequireStaticInputShapes = true,
   });
 
   final String logName;
@@ -52,6 +59,25 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
 
   /// GPU EP 的设备序号。
   final int deviceId;
+
+  /// Diagnostic A/B switch. Applies only to macOS CoreML sessions.
+  final bool coreMlBasicOptimizations;
+  final bool coreMlRequireStaticInputShapes;
+  bool get _staticCoreMlInputs =>
+      Platform.environment.containsKey('ASR_COREML_STATIC_INPUTS')
+          ? Platform.environment['ASR_COREML_STATIC_INPUTS'] == '1'
+          : coreMlRequireStaticInputShapes;
+  String get _coreMlComputeUnits {
+    final value = Platform.environment['ASR_COREML_COMPUTE_UNITS'] ?? 'ALL';
+    if (!{'ALL', 'CPUOnly', 'CPUAndGPU', 'CPUAndNeuralEngine'}
+        .contains(value)) {
+      throw ArgumentError('Unsupported ASR_COREML_COMPUTE_UNITS: $value');
+    }
+    return value;
+  }
+
+  CoreMlSpecialization get _coreMlSpecialization =>
+      CoreMlSpecialization.resolve(Platform.environment);
 
   OrtRuntime get _runtime =>
       OrtRuntime.instance(libraryPathOverride: libraryPathOverride);
@@ -69,6 +95,30 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
       throw FileSystemException('模型文件不存在', modelPath);
     }
     final Uint8List bytes = await file.readAsBytes();
+    String? coreMlCache;
+    if (providers.contains(OnnxExecutionProvider.coreml) && Platform.isMacOS) {
+      final root = await asrSupportRootDirectory();
+      // ORT's in-memory graph hash omits weights. Namespace by actual model
+      // bytes, runtime version and shape overrides to prevent stale reuse.
+      final shapes = (freeDimensionOverrides?.entries.toList() ?? [])
+        ..sort((a, b) => a.key.compareTo(b.key));
+      coreMlCache = p.join(
+          root.path,
+          'coreml_cache',
+          _runtime.versionString,
+          '${coreMlBasicOptimizations ? 'basic' : 'all'}'
+              '${_staticCoreMlInputs ? '-static-inputs-only' : ''}'
+              '${_coreMlComputeUnits == 'ALL' ? '' : '-$_coreMlComputeUnits'}'
+              '${_coreMlSpecialization.cacheSuffix}',
+          sha256.convert(bytes).toString(),
+          shapes.isEmpty
+              ? 'dynamic'
+              : sha256
+                  .convert(utf8.encode(
+                      shapes.map((e) => '${e.key}=${e.value}').join(';')))
+                  .toString());
+      await Directory(coreMlCache).create(recursive: true);
+    }
     return createOnnxSessionWithProviderFallback<OnnxSession>(
       providers: providers,
       onResolved: onProviderResolved,
@@ -78,6 +128,7 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
         effective,
         intraOpNumThreads: intraOpNumThreads,
         freeDimensionOverrides: freeDimensionOverrides,
+        coreMlCache: coreMlCache,
       ),
     );
   }
@@ -87,6 +138,7 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
     List<OnnxExecutionProvider> providers, {
     int? intraOpNumThreads,
     Map<String, int>? freeDimensionOverrides,
+    String? coreMlCache,
   }) {
     final OrtRuntime runtime = _runtime;
     final Pointer<OrtApi> api = runtime.api;
@@ -97,20 +149,39 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
       checkOrtStatus(
         api,
         api.ref.CreateSessionOptions.asFunction<
-                Pointer<OrtStatus> Function(
-                    Pointer<Pointer<OrtSessionOptions>>)>()(
+            Pointer<OrtStatus> Function(Pointer<Pointer<OrtSessionOptions>>)>()(
           optionsOut,
         ),
       );
       options = optionsOut.value;
 
+      final preferred =
+          providers.isEmpty ? OnnxExecutionProvider.cpu : providers.first;
+      final tuning = MacOsSessionTuning.resolve(
+          isMacOS: Platform.isMacOS,
+          environment: Platform.environment,
+          provider: preferred,
+          callerThreads: intraOpNumThreads);
+      intraOpNumThreads = tuning.threads;
+      for (final entry in tuning.entries.entries) {
+        using((arena) {
+          checkOrtStatus(
+              api,
+              api.ref.AddSessionConfigEntry.asFunction<
+                      Pointer<OrtStatus> Function(Pointer<OrtSessionOptions>,
+                          Pointer<Char>, Pointer<Char>)>()(
+                  options,
+                  entry.key.toNativeUtf8(allocator: arena).cast<Char>(),
+                  entry.value.toNativeUtf8(allocator: arena).cast<Char>()));
+        });
+      }
+
       if (intraOpNumThreads != null) {
         checkOrtStatus(
           api,
           api.ref.SetIntraOpNumThreads.asFunction<
-              Pointer<OrtStatus> Function(
-                  Pointer<OrtSessionOptions>, int)>()(options,
-              intraOpNumThreads),
+              Pointer<OrtStatus> Function(Pointer<OrtSessionOptions>,
+                  int)>()(options, intraOpNumThreads),
         );
       }
 
@@ -129,9 +200,10 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
             checkOrtStatus(
               api,
               api.ref.AddFreeDimensionOverrideByName.asFunction<
-                  Pointer<OrtStatus> Function(Pointer<OrtSessionOptions>,
-                      Pointer<Char>, int)>()(options, name.cast<Char>(),
-                  e.value),
+                  Pointer<OrtStatus> Function(
+                      Pointer<OrtSessionOptions>,
+                      Pointer<Char>,
+                      int)>()(options, name.cast<Char>(), e.value),
             );
           } finally {
             calloc.free(name);
@@ -139,12 +211,48 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
         }
       }
 
-      final OnnxExecutionProvider preferred =
-          providers.isEmpty ? OnnxExecutionProvider.cpu : providers.first;
-      _appendProvider(api, options, preferred);
+      if (preferred == OnnxExecutionProvider.coreml &&
+          Platform.isMacOS &&
+          coreMlBasicOptimizations) {
+        checkOrtStatus(
+            api,
+            api.ref.SetSessionGraphOptimizationLevel.asFunction<
+                    Pointer<OrtStatus> Function(
+                        Pointer<OrtSessionOptions>, int)>()(
+                options, GraphOptimizationLevel.ORT_ENABLE_BASIC.value));
+      }
+      _appendProvider(api, options, preferred, coreMlCache: coreMlCache);
+
+      final profileDir = Platform.environment['ASR_ORT_PROFILE_DIR'];
+      final profile = preferred == OnnxExecutionProvider.coreml &&
+          Platform.isMacOS &&
+          profileDir != null &&
+          profileDir.isNotEmpty;
+      if (profile) {
+        Directory(profileDir).createSync(recursive: true);
+        final prefix = p
+            .join(profileDir,
+                'coreml-$pid-${DateTime.now().microsecondsSinceEpoch}')
+            .toNativeUtf8();
+        try {
+          // ORTCHAR_T is char on macOS; generated Windows bindings use WChar.
+          checkOrtStatus(
+              api,
+              api.ref.EnableProfiling
+                  .cast<
+                      NativeFunction<
+                          Pointer<OrtStatus> Function(
+                              Pointer<OrtSessionOptions>, Pointer<Char>)>>()
+                  .asFunction<
+                      Pointer<OrtStatus> Function(Pointer<OrtSessionOptions>,
+                          Pointer<Char>)>()(options, prefix.cast<Char>()));
+        } finally {
+          calloc.free(prefix);
+        }
+      }
 
       final FfiOnnxSession session =
-          FfiOnnxSession.create(runtime, bytes, options);
+          FfiOnnxSession.create(runtime, bytes, options, profiling: profile);
       return session;
     } finally {
       if (options != nullptr) {
@@ -155,11 +263,9 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
     }
   }
 
-  void _appendProvider(
-    Pointer<OrtApi> api,
-    Pointer<OrtSessionOptions> options,
-    OnnxExecutionProvider provider,
-  ) {
+  void _appendProvider(Pointer<OrtApi> api, Pointer<OrtSessionOptions> options,
+      OnnxExecutionProvider provider,
+      {String? coreMlCache}) {
     switch (provider) {
       case OnnxExecutionProvider.cpu:
         return; // CPU 是默认 EP，不需要 append。
@@ -168,11 +274,44 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
       case OnnxExecutionProvider.cuda:
         _appendCuda(api, options);
       case OnnxExecutionProvider.coreml:
-        // CoreML EP 的启用走 `SessionOptionsAppendExecutionProvider_CoreML`，
-        // 只有 Apple 平台的 ORT 构建里才有这个导出符号。macOS 支持是后续的事，
-        // 现在明确抛错而不是静默落到 CPU——静默降级会让人对着「怎么这么慢」猜。
-        throw UnsupportedError('CoreML EP 尚未接入 FFI 后端');
+        _appendCoreMl(api, options, coreMlCache);
     }
+  }
+
+  void _appendCoreMl(Pointer<OrtApi> api, Pointer<OrtSessionOptions> options,
+      String? cacheDirectory) {
+    if (!Platform.isMacOS) {
+      throw UnsupportedError('CoreML FFI is currently supported on macOS only');
+    }
+    final values = <String, String>{
+      'ModelFormat': 'MLProgram',
+      'MLComputeUnits': _coreMlComputeUnits,
+      'RequireStaticInputShapes': _staticCoreMlInputs ? '1' : '0',
+      'EnableOnSubgraphs': '0',
+      ..._coreMlSpecialization.providerOptions,
+      if (cacheDirectory != null) 'ModelCacheDirectory': cacheDirectory,
+    };
+    using((arena) {
+      final name = 'CoreML'.toNativeUtf8(allocator: arena);
+      final keys = arena<Pointer<Char>>(values.length);
+      final vals = arena<Pointer<Char>>(values.length);
+      var i = 0;
+      for (final entry in values.entries) {
+        keys[i] = entry.key.toNativeUtf8(allocator: arena).cast<Char>();
+        vals[i] = entry.value.toNativeUtf8(allocator: arena).cast<Char>();
+        i++;
+      }
+      checkOrtStatus(
+          api,
+          api.ref.SessionOptionsAppendExecutionProvider.asFunction<
+                  Pointer<OrtStatus> Function(
+                      Pointer<OrtSessionOptions>,
+                      Pointer<Char>,
+                      Pointer<Pointer<Char>>,
+                      Pointer<Pointer<Char>>,
+                      int)>()(
+              options, name.cast<Char>(), keys, vals, values.length));
+    });
   }
 
   void _appendDirectMl(
@@ -190,8 +329,8 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
       checkOrtStatus(
         api,
         api.ref.GetExecutionProviderApi.asFunction<
-            Pointer<OrtStatus> Function(
-                Pointer<Char>, int, Pointer<Pointer<Void>>)>()(
+                Pointer<OrtStatus> Function(
+                    Pointer<Char>, int, Pointer<Pointer<Void>>)>()(
             name.cast<Char>(), kOrtApiVersion, apiOut),
       );
       final Pointer<OrtDmlApi> dml = apiOut.value.cast<OrtDmlApi>();
@@ -214,10 +353,9 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
       );
       checkOrtStatus(
         api,
-        dml.ref.SessionOptionsAppendExecutionProvider_DML
-            .asFunction<
-                Pointer<OrtStatus> Function(
-                    Pointer<OrtSessionOptions>, int)>()(options, deviceId),
+        dml.ref.SessionOptionsAppendExecutionProvider_DML.asFunction<
+            Pointer<OrtStatus> Function(
+                Pointer<OrtSessionOptions>, int)>()(options, deviceId),
       );
     } finally {
       calloc.free(name);
@@ -232,9 +370,8 @@ class FfiOnnxSessionFactory implements OnnxSessionFactory {
     checkOrtStatus(
       api,
       api.ref.SessionOptionsAppendExecutionProvider_CUDA_V2.asFunction<
-              Pointer<OrtStatus> Function(Pointer<OrtSessionOptions>,
-                  Pointer<OrtCUDAProviderOptionsV2>)>()(
-          options, _cudaOptions(api)),
+          Pointer<OrtStatus> Function(Pointer<OrtSessionOptions>,
+              Pointer<OrtCUDAProviderOptionsV2>)>()(options, _cudaOptions(api)),
     );
   }
 

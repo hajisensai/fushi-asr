@@ -15,4 +15,8 @@ export 'package:asr_core/asr_core.dart';
 export 'package:asr_onnx_ffi/asr_onnx_ffi.dart';
 
 export 'src/subtitle_format.dart';
+export 'src/subtitle_retiming.dart';
 export 'src/transcribe_runner.dart';
+export 'src/apple_transcribe_runner.dart';
+export 'src/epub_alignment.dart';
+export 'src/cancellation.dart';

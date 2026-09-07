@@ -46,6 +46,10 @@ asr transcribe -l ja --server http://192.168.1.10:8642 audiobook.m4b -o out.srt
 
 其它环境变量：`ASR_DATA_DIR`（模型与任务目录的根）、`ASR_MODELS_MANIFEST`（自带模型清单）。
 
+macOS 可用 `transcribe --coreml` 或 `serve --coreml` 显式启用 CoreML FP32 编码器。
+当前日语模型实测比 INT8 CPU 慢，因此默认自动模式仍用 CPU。
+用法、算子执行证明与三方测速见 [docs/MACOS_COREML.md](docs/MACOS_COREML.md)。
+
 ## 自带模型
 
 ```bash
@@ -81,12 +85,31 @@ asr --models models.json transcribe -l hi 印地语.mp3
 | `GET /` | 网页界面（单文件、零外部资源，内网离线可用） |
 | `GET /v1/health` | 探活，不需要令牌 |
 | `GET /v1/models` | 认得哪些语言与模型包 |
-| `POST /v1/transcribe?language=ja&format=srt` | **请求体就是音频字节**（不做 multipart）。响应是流式 NDJSON，一行一个进度事件，最后一行是 `result` 或 `error` |
+| `POST /v1/transcribe?language=ja&format=srt` | 请求体为音频字节，或 `audio` + `epub` 两个文件的 multipart。响应是流式 NDJSON，一行一个进度事件，最后一行是 `result`、`cancelled` 或 `error` |
+| `POST /v1/retime?language=ja&format=srt` | 字幕对轴：multipart 上传 `audio`（音频或视频）和 `subtitle`（UTF-8 SRT/VTT，最多 8 MiB），保留字幕原文和条数，根据语音重新校准时间；同样返回 NDJSON |
 
 设了 `--token` 时请求要带 `Authorization: Bearer <token>`。
 
 ```js
 const res = await fetch('/v1/transcribe?language=ja', { method: 'POST', body: file });
+```
+
+对轴支持与转录相同的 `engine`、`filename`、`jobId` 参数，以及 SRT、VTT、JSON 输出。
+`result.text` 是校准后的字幕，`rawText` 是语音识别原始结果；`retiming` 包含直接匹配、
+插值、保持原轴的条数、匹配率、时间偏移和警告，便于检查未找到可靠语音锚点的部分。
+日文电视字幕的前置角色名、音效括注只在匹配时忽略，导出保留原文。
+字幕与 ASR 分句不一致时，可利用多个独立语音边界估计分段时间偏移或漂移；
+片头、广告等版本差异会分开处理。界面区分时间校准条数、整句匹配与估算，
+避免将整句匹配率误当成校准覆盖率。
+
+```js
+const body = new FormData();
+body.append('audio', mediaFile);
+body.append('subtitle', subtitleFile);
+const res = await fetch('/v1/retime?language=ja&format=srt', {
+  method: 'POST',
+  body,
+});
 ```
 
 **判成功的依据是「有没有收到 `result` 行」，不是 HTTP 状态码**：响应一旦开始流式写就
@@ -116,6 +139,10 @@ cd packages/asr_align && dart test       # 15 条
 cd packages/asr && dart test             # 10 条
 cd packages/asr_server && dart test      # 10 条
 ```
+
+Apple Silicon macOS 可直接运行 `./script/bootstrap_macos.sh` 安装项目本地 Dart
+SDK、FFmpeg 与 ONNX Runtime，然后用 `./script/check.sh` 做完整检查。macOS 宿主适配的
+环境说明与边界建议见 [docs/MACOS_DEVELOPMENT.md](docs/MACOS_DEVELOPMENT.md)。
 
 重新生成 ORT FFI 绑定（改 ORT 版本时才需要，产物已入库，普通使用者不必装 LLVM）：
 

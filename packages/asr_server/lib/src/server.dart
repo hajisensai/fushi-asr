@@ -2,9 +2,7 @@
 ///
 /// 设计上的两个刻意选择：
 ///
-/// - **上传走原始请求体，不做 multipart**。`POST /v1/transcribe?language=ja` 的
-///   body 就是音频字节。少一个解析器、少一类边界 bug；浏览器侧
-///   `fetch(url, {method:'POST', body: file})` 一行就够。
+/// - 音频转录支持原始请求体；EPUB / 字幕对轴使用限定两个文件字段的 multipart。
 /// - **响应是流式 NDJSON**，一行一个进度事件，最后一行带结果。不用 SSE：SSE 要
 ///   自己维护事件分帧，而这里一个连接只服务一个任务，NDJSON 已经够用，且 CLI 和
 ///   浏览器解析同一套。
@@ -13,10 +11,40 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:asr/asr.dart';
+import 'package:mime/mime.dart';
 
 import 'package:asr_server/src/web_ui.dart';
+
+/// 放弃 multipart 解析后仍愿意读完的请求体余量。把剩余字节读掉是为了让 400 响应
+/// 真的送达（见 `_receiveUpload`）；超过这个余量的请求体不值得继续收。
+const int kUploadDrainSlackBytes = 8 * 1024 * 1024;
+
+class TranscribeBackend {
+  const TranscribeBackend(
+      {required this.id,
+      required this.name,
+      required this.description,
+      required this.service,
+      required this.languages,
+      this.unavailableReason});
+  final String id;
+  final String name;
+  final String description;
+  final TranscribeService service;
+  final List<String> languages;
+  final String? unavailableReason;
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'name': name,
+        'description': description,
+        'languages': languages,
+        'available': unavailableReason == null,
+        'unavailableReason': unavailableReason
+      };
+}
 
 /// 转录服务端。
 class AsrServer {
@@ -26,10 +54,23 @@ class AsrServer {
     this.token,
     this.concurrency = 1,
     this.maxUploadBytes = 4 * 1024 * 1024 * 1024,
+    this.backends,
   }) : assert(concurrency >= 1);
 
   final TranscribeService runner;
   final AsrModelRegistry registry;
+  final List<TranscribeBackend>? backends;
+
+  List<TranscribeBackend> get _backends =>
+      backends ??
+      [
+        TranscribeBackend(
+            id: 'default',
+            name: 'ReazonSpeech · 服务器默认',
+            description: '使用服务器配置的执行后端',
+            service: runner,
+            languages: registry.languages.map((l) => l.tag).toList())
+      ];
 
   /// 接口令牌；null = 不鉴权（只在绑回环地址时才该这么用）。
   final String? token;
@@ -44,6 +85,23 @@ class AsrServer {
   HttpServer? _http;
   int _running = 0;
   final List<Completer<void>> _waiting = <Completer<void>>[];
+  final Map<String, _ServerTask> _tasks = {};
+
+  String _newTask() {
+    final random = Random.secure();
+    final id = List.generate(
+            24, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'))
+        .join();
+    final task = _ServerTask();
+    _tasks[id] = task;
+    task.expiry = Timer(const Duration(minutes: 5), () {
+      if (!task.claimed) {
+        _tasks.remove(id);
+        task.finished.complete();
+      }
+    });
+    return id;
+  }
 
   /// 起服务，返回实际监听的地址。
   Future<Uri> start({String host = '127.0.0.1', int port = 8642}) async {
@@ -54,7 +112,14 @@ class AsrServer {
   }
 
   Future<void> stop() async {
+    for (final task in _tasks.values.toList()) {
+      task.cancellation.cancel();
+      task.expiry?.cancel();
+      if (!task.claimed && !task.finished.isCompleted) task.finished.complete();
+    }
     await _http?.close(force: true);
+    await Future.wait(_tasks.values.map((t) => t.finished.future));
+    _tasks.clear();
     _http = null;
   }
 
@@ -104,15 +169,54 @@ class AsrServer {
                 'id': p.id,
                 'displayName': p.displayName,
                 'architecture': p.architecture.name,
-                'languages':
-                    <String>[for (final AsrLanguage l in p.languages) l.tag],
+                'languages': <String>[
+                  for (final AsrLanguage l in p.languages) l.tag
+                ],
               },
           ],
         });
         return;
       }
+      if (path == '/v1/backends' && request.method == 'GET') {
+        await _json(
+            response, {'backends': _backends.map((b) => b.toJson()).toList()});
+        return;
+      }
+      if (path == '/v1/jobs' && request.method == 'POST') {
+        if (_tasks.length >= 1024) {
+          response.statusCode = HttpStatus.tooManyRequests;
+          await _json(response, {'error': '任务过多，请稍后重试'});
+          return;
+        }
+        await _json(response, {'jobId': _newTask()});
+        return;
+      }
+      final cancelMatch =
+          RegExp(r'^/v1/jobs/([a-f0-9]{48})/cancel$').firstMatch(path);
+      if (cancelMatch != null && request.method == 'POST') {
+        final id = cancelMatch.group(1)!;
+        final task = _tasks[id];
+        if (task == null) {
+          await _json(response, {'status': 'finished'});
+          return;
+        }
+        task.cancellation.cancel();
+        task.expiry?.cancel();
+        if (!task.claimed) {
+          _tasks.remove(id);
+          if (!task.finished.isCompleted) task.finished.complete();
+        }
+        // Acknowledgement means the slot and resources really are released.
+        await task.finished.future;
+        await _json(response, {'status': 'cancelled'});
+        return;
+      }
       if (path == '/v1/transcribe' && request.method == 'POST') {
         await _transcribe(request, response);
+        return;
+      }
+      if (path == '/v1/retime' && request.method == 'POST') {
+        await _transcribe(request, response, retiming: true);
         return;
       }
       response.statusCode = HttpStatus.notFound;
@@ -137,11 +241,13 @@ class AsrServer {
   bool _authorized(HttpRequest request) {
     final String? expected = token;
     if (expected == null) return true;
-    final String? header = request.headers.value(HttpHeaders.authorizationHeader);
+    final String? header =
+        request.headers.value(HttpHeaders.authorizationHeader);
     return header == 'Bearer $expected';
   }
 
-  Future<void> _transcribe(HttpRequest request, HttpResponse response) async {
+  Future<void> _transcribe(HttpRequest request, HttpResponse response,
+      {bool retiming = false}) async {
     final String? tag = request.uri.queryParameters['language'];
     final AsrLanguage? language = AsrLanguage.fromTag(tag);
     if (language == null) {
@@ -154,8 +260,7 @@ class AsrServer {
       });
       return;
     }
-    final String formatName =
-        request.uri.queryParameters['format'] ?? 'srt';
+    final String formatName = request.uri.queryParameters['format'] ?? 'srt';
     final SubtitleFormat? format = SubtitleFormat.fromName(formatName);
     if (format == null) {
       response.statusCode = HttpStatus.badRequest;
@@ -163,27 +268,87 @@ class AsrServer {
       return;
     }
 
-    final Directory work =
-        await Directory.systemTemp.createTemp('asr_upload_');
-    final File upload = File('${work.path}${Platform.pathSeparator}'
-        '${_safeName(request.uri.queryParameters['filename'])}');
-    try {
-      int received = 0;
-      final IOSink sink = upload.openWrite();
-      try {
-        await for (final List<int> chunk in request) {
-          received += chunk.length;
-          if (received > maxUploadBytes) {
-            throw const FormatException('上传超过上限');
-          }
-          sink.add(chunk);
-        }
-      } finally {
-        await sink.close();
+    final engineId = request.uri.queryParameters['engine'];
+    TranscribeBackend? backend;
+    if (engineId != null) {
+      for (final candidate in _backends) {
+        if (candidate.id == engineId) backend = candidate;
       }
-      if (received == 0) {
+      if (backend == null ||
+          backend.unavailableReason != null ||
+          !backend.languages.contains(language.tag)) {
         response.statusCode = HttpStatus.badRequest;
-        await _json(response, <String, Object?>{'error': '请求体是空的'});
+        await _json(response, {
+          'error': backend?.unavailableReason ?? '未知或不支持此语言的转录方案：$engineId'
+        });
+        return;
+      }
+    }
+
+    final requestedJob = request.uri.queryParameters['jobId'];
+    final id = requestedJob ?? _newTask();
+    final task = _tasks[id];
+    if (task == null || task.claimed) {
+      response.statusCode = HttpStatus.conflict;
+      await _json(response, {'error': '任务不存在、已终止或已提交'});
+      return;
+    }
+    task.claimed = true;
+    task.expiry?.cancel();
+    final cancellation = task.cancellation;
+    // Socket failures also stop computation rather than leaving orphan jobs.
+    unawaited(
+        response.done.then<void>((_) {}, onError: (Object _, StackTrace __) {
+      cancellation.cancel();
+    }));
+    Directory? work;
+    // 契约：客户端收到最后一行时，上传的临时文件已经不在了。所以清理必须发生在
+    // 关闭响应之前；finally 里那次只是异常路径的兜底。
+    void cleanupWork() {
+      final Directory? dir = work;
+      if (dir == null || !dir.existsSync()) return;
+      try {
+        dir.deleteSync(recursive: true);
+      } on FileSystemException {
+        // 转录进程可能还占着；留给系统清临时目录。
+      }
+    }
+
+    try {
+      final temp = await Directory.systemTemp.createTemp('asr_upload_');
+      work = temp;
+      final File upload = File('${temp.path}${Platform.pathSeparator}'
+          // Unique basename also prevents completed Reazon jobs from satisfying a
+          // new upload with the same name/size. Every UI run performs real work.
+          '${temp.uri.pathSegments.where((s) => s.isNotEmpty).last}-'
+          '${_safeName(request.uri.queryParameters['filename'])}');
+      final attachment =
+          File('${temp.path}/${retiming ? 'subtitle.txt' : 'book.epub'}');
+      bool withBook;
+      List<SubtitleCue>? subtitleCues;
+      final subtitleWatch = Stopwatch();
+      try {
+        final withAttachment = await _receiveUpload(
+            request, upload, attachment, cancellation,
+            retiming: retiming);
+        withBook = withAttachment && !retiming;
+        if (retiming) {
+          subtitleWatch.start();
+          cancellation.throwIfCancelled();
+          final parsed = await cancellableCompute(
+              _subtitleReadTask(attachment.path), cancellation);
+          if (parsed.$2 != null) throw FormatException(parsed.$2!);
+          subtitleCues = parsed.$1!;
+          cancellation.throwIfCancelled();
+          subtitleWatch.stop();
+        }
+      } on FormatException catch (error) {
+        response.statusCode = HttpStatus.badRequest;
+        await _json(response, {'error': error.message});
+        return;
+      } on MimeMultipartException {
+        response.statusCode = HttpStatus.badRequest;
+        await _json(response, {'error': 'multipart 上传内容不完整或格式无效'});
         return;
       }
 
@@ -201,60 +366,291 @@ class AsrServer {
         response.add(utf8.encode('${jsonEncode(json)}\n'));
       }
 
-      await _acquire();
+      // Send before waiting so clients distinguish queueing from uploading.
+      emit(<String, Object?>{'phase': 'queued', 'fraction': 0});
+      await response.flush();
+      bool acquired = false;
       try {
-        emit(<String, Object?>{'phase': 'queued', 'fraction': 0});
-        final TranscribeOutcome outcome = await runner.run(
+        await _acquire(cancellation);
+        acquired = true;
+        cancellation.throwIfCancelled();
+        final pipelineWatch = Stopwatch()..start();
+        if (subtitleCues != null) {
+          emit({
+            'phase': 'subtitle',
+            'detail': '已解析 ${subtitleCues.length} 条字幕，保留原文并校准时间轴'
+          });
+        }
+        EpubBook? book;
+        if (withBook) {
+          emit({'phase': 'book', 'detail': '按 EPUB 阅读顺序解析正文与 ruby 注音'});
+          book = await readCancellableEpubBook(attachment.path, cancellation);
+        }
+        final bookReadMs = pipelineWatch.elapsedMilliseconds;
+        final transcribeWatch = Stopwatch()..start();
+        final TranscribeOutcome outcome =
+            await (backend?.service ?? runner).run(
           audioPaths: <String>[upload.path],
           language: language,
           format: format,
+          cancellation: cancellation,
           onProgress: (TranscribeProgress p) => emit(p.toJson()),
         );
+        transcribeWatch.stop();
+        cancellation.throwIfCancelled();
+        BookAlignedSubtitles? aligned;
+        RetimedSubtitles? retimed;
+        final alignmentWatch = Stopwatch()..start();
+        if (book != null) {
+          emit({
+            'phase': 'align',
+            'detail': '正文匹配、锚点回填与句界校准（${book.sections.length} 个正文片段）'
+          });
+          aligned = await alignTranscriptionWithBook(book, outcome, format,
+              cancellation: cancellation);
+        }
+        if (subtitleCues != null) {
+          emit({
+            'phase': 'retime',
+            'detail': '匹配语音锚点并校准 ${subtitleCues.length} 条字幕时间轴'
+          });
+          retimed = await retimeSubtitles(subtitleCues, outcome, format,
+              cancellation: cancellation);
+        }
+        alignmentWatch.stop();
+        pipelineWatch.stop();
+        cancellation.throwIfCancelled();
         emit(<String, Object?>{
           'phase': 'result',
           'fraction': 1,
           'format': format.name,
-          'cueCount': outcome.cues.length,
+          'cueCount':
+              retimed?.cueCount ?? aligned?.cueCount ?? outcome.cues.length,
           'audioMs': outcome.audioMs,
-          'elapsedMs': outcome.elapsed.inMilliseconds,
-          'provider': outcome.provider.effective.name,
-          'fellBack': outcome.provider.didFallBack,
-          'text': outcome.text,
+          'elapsedMs': pipelineWatch.elapsedMilliseconds +
+              subtitleWatch.elapsedMilliseconds,
+          'transcribeMs': transcribeWatch.elapsedMilliseconds,
+          'bookReadMs': bookReadMs,
+          if (retiming) 'subtitleReadMs': subtitleWatch.elapsedMilliseconds,
+          if (aligned != null)
+            'alignment': {
+              ...aligned.stats,
+              'elapsedMs': alignmentWatch.elapsedMilliseconds
+            },
+          if (retimed != null)
+            'retiming': {
+              ...retimed.stats,
+              'elapsedMs': alignmentWatch.elapsedMilliseconds
+            },
+          'provider': outcome.providerLabel,
+          'fellBack': outcome.provider?.didFallBack ?? false,
+          'engine': backend?.id ?? 'default',
+          'engineName': backend?.name ?? '服务器默认',
+          'text': retimed?.text ?? aligned?.text ?? outcome.text,
+          if (aligned != null || retimed != null) 'rawText': outcome.text,
         });
+      } on TranscribeCancelled {
+        emit({'phase': 'cancelled', 'detail': '任务已终止，运算资源已释放'});
       } catch (error) {
         // 已经开始流式写了，改不了状态码，所以错误也走 NDJSON 的最后一行。
         // 客户端的判据必须是「有没有收到 result 行」，不是 HTTP 状态码。
         emit(<String, Object?>{'phase': 'error', 'error': '$error'});
       } finally {
-        _release();
+        if (acquired) _release();
       }
+      cleanupWork();
+      await response.close();
+    } on TranscribeCancelled {
+      // Cancellation while uploading: no inference has started yet.
+      response.statusCode = HttpStatus.ok;
+      response.headers.contentType =
+          ContentType('application', 'x-ndjson', charset: 'utf-8');
+      response.add(utf8.encode('${jsonEncode({'phase': 'cancelled'})}\n'));
+      cleanupWork();
       await response.close();
     } finally {
-      if (work.existsSync()) {
-        try {
-          work.deleteSync(recursive: true);
-        } on FileSystemException {
-          // 转录进程可能还占着；留给系统清临时目录。
-        }
-      }
+      cleanupWork();
+      _tasks.remove(id);
+      if (!task.finished.isCompleted) task.finished.complete();
     }
   }
 
-  Future<void> _acquire() async {
+  Future<bool> _receiveUpload(HttpRequest request, File audio, File attachment,
+      TranscribeCancellation cancellation,
+      {bool retiming = false}) async {
+    int total = 0;
+    final attachmentName = retiming ? 'subtitle' : 'epub';
+    final attachmentLimit = retiming ? maxSubtitleBytes : maxEpubBytes;
+    StreamIterator<List<int>>? activeUpload;
+    Future<void> save(Stream<List<int>> stream, File file, int limit) async {
+      int size = 0;
+      final sink = file.openWrite();
+      final chunks = StreamIterator(stream);
+      activeUpload = chunks;
+      try {
+        while (await chunks.moveNext()) {
+          final chunk = chunks.current;
+          cancellation.throwIfCancelled();
+          size += chunk.length;
+          total += chunk.length;
+          if (size > limit || total > maxUploadBytes + attachmentLimit) {
+            throw FormatException(retiming
+                ? '上传超过上限（字幕 8 MiB，音视频按服务器上限）'
+                : '上传超过上限（EPUB 64 MiB，音频按服务器上限）');
+          }
+          sink.add(chunk);
+          await sink.flush();
+        }
+      } finally {
+        await chunks.cancel();
+        await sink.close();
+        activeUpload = null;
+      }
+      if (size == 0) throw const FormatException('请求体或上传文件是空的');
+    }
+
+    final contentType = request.headers.contentType;
+    if (contentType?.mimeType != 'multipart/form-data') {
+      if (retiming) {
+        throw const FormatException('字幕对轴必须使用 multipart 同时上传 audio 和 subtitle');
+      }
+      await save(request, audio, maxUploadBytes);
+      return false;
+    }
+    final boundary = contentType!.parameters['boundary'];
+    if (boundary == null || boundary.isEmpty || boundary.length > 200) {
+      throw const FormatException('缺少或无效 multipart boundary');
+    }
+    final seen = <String>{};
+    StreamIterator<MimeMultipart>? parts;
+    // dart:io 在 request body 的订阅被取消时就地拆连接，与「写 400 响应」竞速：
+    // multipart 解析出错时先取消订阅再写响应，客户端多半只看到连接被关掉
+    // （Connection closed before full header was received）。这里自己持有 body
+    // 订阅并做背压转发：解析器中止只关中继，剩余请求体仍由我们读完，响应才送得出去。
+    final relay = StreamController<List<int>>();
+    final bodyDone = Completer<void>();
+    bool relayOpen = true;
+    int drained = 0;
+    // 放弃解析后还愿意继续读的字节上界；越界（恶意大包）就不再为一句 400 收下去。
+    int? drainLimit;
+    late final StreamSubscription<List<int>> body;
+    body = request.listen(
+      (List<int> chunk) {
+        drained += chunk.length;
+        if (relayOpen) {
+          relay.add(chunk);
+          return;
+        }
+        final int? limit = drainLimit;
+        if (limit != null && drained > limit) {
+          if (!bodyDone.isCompleted) bodyDone.complete();
+          unawaited(body.cancel());
+        }
+      },
+      onError: (Object error, StackTrace stack) {
+        if (relayOpen) relay.addError(error, stack);
+      },
+      onDone: () {
+        if (relayOpen) {
+          relayOpen = false;
+          relay.close();
+        }
+        if (!bodyDone.isCompleted) bodyDone.complete();
+      },
+      cancelOnError: false,
+    );
+    relay
+      ..onPause = body.pause
+      ..onResume = body.resume
+      // 解析器取消 = 停止转发，但订阅仍归我们，剩余请求体继续读掉。
+      ..onCancel = () => relayOpen = false;
+
+    try {
+      await _guardMultipart(() async {
+        final incoming = parts = StreamIterator(
+            relay.stream.transform(MimeMultipartTransformer(boundary)));
+        try {
+          while (await incoming.moveNext()) {
+            final part = incoming.current;
+            HeaderValue disposition;
+            try {
+              disposition =
+                  HeaderValue.parse(part.headers['content-disposition'] ?? '');
+            } on HttpException {
+              throw const FormatException('上传文件的 Content-Disposition 无效');
+            }
+            final name = disposition.parameters['name'];
+            if (!{'audio', attachmentName}.contains(name) || !seen.add(name!)) {
+              throw FormatException('只允许唯一 audio 和 $attachmentName 文件');
+            }
+            if (retiming) {
+              final filename = disposition.parameters['filename'];
+              if (disposition.value != 'form-data' ||
+                  filename == null ||
+                  filename.trim().isEmpty) {
+                throw const FormatException('audio 和 subtitle 必须是带文件名的上传文件');
+              }
+              if (name == 'subtitle' &&
+                  !RegExp(r'\.(srt|vtt)$', caseSensitive: false)
+                      .hasMatch(filename)) {
+                throw const FormatException('字幕仅支持 UTF-8 编码的 SRT 或 VTT 文件');
+              }
+            }
+            await save(part, name == 'audio' ? audio : attachment,
+                name == 'audio' ? maxUploadBytes : attachmentLimit);
+          }
+        } finally {
+          await incoming.cancel();
+        }
+      }, () async {
+        try {
+          await activeUpload?.cancel();
+        } finally {
+          await parts?.cancel();
+        }
+      });
+    } finally {
+      if (relayOpen) {
+        relayOpen = false;
+        // 不 await：中继的 done 要等解析器那侧消费，这里只要求停止转发。
+        unawaited(relay.close());
+      }
+      drainLimit = drained + kUploadDrainSlackBytes;
+      await bodyDone.future;
+      await body.cancel();
+    }
+    if (!seen.containsAll(['audio', attachmentName])) {
+      throw FormatException('必须同时上传 audio 和 $attachmentName');
+    }
+    return true;
+  }
+
+  Future<void> _acquire(TranscribeCancellation cancellation) async {
+    cancellation.throwIfCancelled();
     if (_running < concurrency) {
       _running++;
       return;
     }
     final Completer<void> waiter = Completer<void>();
     _waiting.add(waiter);
-    await waiter.future;
-    _running++;
+    final detach = cancellation.listen(() {
+      if (_waiting.remove(waiter)) {
+        waiter.completeError(const TranscribeCancelled());
+      }
+    });
+    try {
+      await waiter.future;
+    } finally {
+      detach();
+    }
   }
 
   void _release() {
-    _running--;
     if (_waiting.isNotEmpty) {
+      // Transfer ownership directly; a new request cannot steal the freed slot.
       _waiting.removeAt(0).complete();
+    } else {
+      _running--;
     }
   }
 
@@ -263,6 +659,65 @@ class AsrServer {
     response.add(utf8.encode(jsonEncode(json)));
     await response.close();
   }
+}
+
+/// Keep preflight parsing cancellable without capturing request/socket state.
+/// Validation failures travel as values so they remain HTTP 400 across isolates.
+Future<(List<SubtitleCue>?, String?)> Function() _subtitleReadTask(
+        String path) =>
+    () async {
+      String input;
+      try {
+        input = utf8.decode(await File(path).readAsBytes());
+      } on FormatException {
+        return (null, '字幕必须使用 UTF-8 编码，请转换编码后重新上传');
+      }
+      try {
+        return (parseRetimingSubtitles(input), null);
+      } on FormatException catch (error) {
+        return (null, error.message.toString());
+      }
+    };
+
+/// mime 2.0 can throw malformed-header errors from its source callback instead
+/// of adding a stream error. Cancel both iterators to unblock file writes, then
+/// report that error only after the upload routine has closed its resources.
+Future<void> _guardMultipart(
+    Future<void> Function() receive, Future<void> Function() cancel) {
+  final result = Completer<void>();
+  Object? parserError;
+  StackTrace? parserStack;
+  runZonedGuarded(() {
+    receive().then((_) {
+      if (result.isCompleted) return;
+      if (parserError != null) {
+        result.completeError(parserError!, parserStack);
+      } else {
+        result.complete();
+      }
+    }, onError: (Object error, StackTrace stack) {
+      if (!result.isCompleted) {
+        result.completeError(parserError ?? error, parserStack ?? stack);
+      }
+    });
+  }, (error, stack) {
+    if (parserError != null || result.isCompleted) return;
+    parserError = error;
+    parserStack = stack;
+    unawaited(Future<void>.sync(cancel).then<void>((_) {},
+        onError: (Object _, StackTrace __) {
+      // A cleanup failure must not reenter the error zone or strand the request.
+      if (!result.isCompleted) result.completeError(parserError!, parserStack);
+    }));
+  });
+  return result.future;
+}
+
+class _ServerTask {
+  final cancellation = TranscribeCancellation();
+  final finished = Completer<void>();
+  bool claimed = false;
+  Timer? expiry;
 }
 
 /// 上传文件名只用来给 ffmpeg 一个像样的扩展名；一律剥路径分隔符。
@@ -274,5 +729,7 @@ String _safeName(String? raw) {
   final String base = raw.split(RegExp(r'[\\/]')).last;
   final String cleaned = base.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
   if (cleaned.isEmpty || cleaned == '.' || cleaned == '..') return 'upload.bin';
-  return cleaned.length > 120 ? cleaned.substring(cleaned.length - 120) : cleaned;
+  return cleaned.length > 120
+      ? cleaned.substring(cleaned.length - 120)
+      : cleaned;
 }

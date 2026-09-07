@@ -194,7 +194,7 @@ void main() {
       });
     });
 
-    test('macOS / iOS fp32：CoreML 即使可用也不开（BUG-1613，待真机拿数）', () {
+    test('macOS / iOS auto：保持 CPU，CoreML 需要显式请求', () {
       for (final AsrPlatform platform in <AsrPlatform>[
         AsrPlatform.macos,
         AsrPlatform.ios,
@@ -210,6 +210,42 @@ void main() {
           reason: platform.name,
         );
       }
+    });
+
+    test('explicit CoreML selects macOS FP32 and preserves INT8 CPU path', () {
+      expect(
+          selectAsrEncoderProviders(
+              platform: AsrPlatform.macos,
+              available: all,
+              preference: AsrAccelerationPreference.coreml,
+              variant: AsrEncoderVariant.fp32),
+          [OnnxExecutionProvider.coreml, OnnxExecutionProvider.cpu]);
+      expect(
+          recommendAsrEncoderVariant(
+              platform: AsrPlatform.macos,
+              available: all,
+              preference: AsrAccelerationPreference.coreml),
+          AsrEncoderVariant.fp32);
+      expect(
+          selectAsrEncoderProviders(
+              platform: AsrPlatform.macos,
+              available: all,
+              preference: AsrAccelerationPreference.coreml,
+              variant: AsrEncoderVariant.int8),
+          _cpu);
+      expect(
+          () => selectAsrEncoderProviders(
+              platform: AsrPlatform.ios,
+              available: all,
+              preference: AsrAccelerationPreference.coreml,
+              variant: AsrEncoderVariant.fp32),
+          throwsUnsupportedError);
+      expect(
+          () => recommendAsrEncoderVariant(
+              platform: AsrPlatform.macos,
+              available: {},
+              preference: AsrAccelerationPreference.coreml),
+          throwsUnsupportedError);
     });
 
     test('Linux / Android fp32：CPU', () {

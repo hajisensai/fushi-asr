@@ -1,0 +1,58 @@
+@import "tailwindcss" source(none);
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@source "./src";
+@custom-variant dark (&:is(.dark *));
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans", sans-serif;
+  --font-heading: var(--font-sans);
+  --color-background: var(--background); --color-foreground: var(--foreground);
+  --color-card: var(--background); --color-card-foreground: var(--foreground);
+  --color-popover: var(--background); --color-popover-foreground: var(--foreground);
+  --color-primary: var(--foreground); --color-primary-foreground: var(--background);
+  --color-secondary: var(--muted); --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--muted); --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--destructive); --color-border: var(--border); --color-input: var(--border); --color-ring: var(--muted-foreground);
+  --radius-sm: calc(var(--radius) * .6); --radius-md: calc(var(--radius) * .8); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) * 1.4);
+}
+:root { color-scheme: light; --background: #fff; --foreground: #171717; --muted: #f7f7f7; --muted-foreground: #737373; --border: #e5e5e5; --destructive: #a12d2d; --radius: .5rem; }
+.dark { color-scheme: dark; --background: #171717; --foreground: #f5f5f5; --muted: #252525; --muted-foreground: #a3a3a3; --border: #3a3a3a; --destructive: #f4a6a6; }
+@layer base {
+  * { @apply border-border; }
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+  body { @apply bg-background text-foreground font-sans text-sm antialiased; margin: 0; line-height: 1.6; }
+  button:not(:disabled), [role="button"]:not([disabled]) { cursor: pointer; }
+  :focus-visible { outline-offset: 3px; }
+}
+@layer components {
+  .topbar { @apply flex items-center justify-between gap-2 h-16 px-3 sm:px-6 border-b; }
+  .workspace-layout { @apply md:grid md:grid-cols-[200px_minmax(0,1fr)]; min-height: calc(100dvh - 4rem); }
+  .workspace-sidebar { @apply hidden md:flex flex-col border-r p-4 pt-9; }
+  .workspace { @apply w-full min-w-0 max-w-5xl mx-auto px-5 sm:px-10 pt-9 pb-12; }
+  .section-title { @apply text-base font-semibold; }
+  .note { @apply text-xs text-muted-foreground; overflow-wrap: anywhere; }
+  .metric-value { @apply text-[26px] font-medium tabular-nums tracking-tight mt-1 leading-tight; }
+  .steps { @apply flex items-center my-4 text-xs text-muted-foreground; }
+  .steps li { @apply flex items-center gap-2; flex: 1; white-space: nowrap; }
+  .steps li::before { content: ''; width: 9px; height: 9px; border: 1px solid var(--muted-foreground); border-radius: 50%; flex-shrink: 0; }
+  .steps li:not(:last-child)::after { content: ''; height: 1px; background: var(--border); margin: 0 10px 0 2px; flex: 1; }
+  .steps li:last-child { flex: 0; }
+  .steps li.current { color: var(--foreground); font-weight: 600; }
+  .steps li.current::before, .steps li.finished::before { background: var(--foreground); border-color: var(--foreground); }
+  .steps li.skipped { opacity: .3; }
+  .result:only-child { grid-column: 1 / -1; }
+  .skip-link { @apply fixed left-4 p-2 bg-background; top: -100px; }
+  .skip-link:focus { top: 8px; }
+}
+/* Flat design tokens and component states, shared by all component instances. */
+[data-slot="select-content"], [data-slot="sheet-content"] { box-shadow: none; }
+[data-slot="sheet-overlay"] { backdrop-filter: none; }
+[data-slot="textarea"] { field-sizing: fixed; font: 12px/1.8 ui-monospace, Menlo, monospace; background: var(--muted); }
+[data-slot="progress"][data-state="indeterminate"] { animation: breathe 1.4s ease-in-out infinite alternate; }
+[data-slot="progress"][data-state="indeterminate"] [data-slot="progress-indicator"] { transform: none !important; opacity: .25; }
+.drop-target[data-dragging="true"] { outline: 2px solid var(--foreground); outline-offset: 3px; background: var(--muted); }
+.drop-target span > span:last-child { font-size: 12px; color: var(--muted-foreground); font-weight: 400; }
+@keyframes breathe { from { opacity: .3; } to { opacity: .8; } }
+@media (max-width: 639px) { .steps { font-size: 10px; } .steps li { gap: 4px; } .steps li:not(:last-child)::after { margin: 0 5px 0 0; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }

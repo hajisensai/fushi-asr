@@ -2,6 +2,7 @@
 library;
 
 import 'dart:ffi';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:asr_core/asr_core.dart';
@@ -19,7 +20,7 @@ import 'package:asr_onnx_ffi/src/ort_runtime.dart';
 ///   拷贝也不拥有 `p_data`），省掉 method channel 的两次序列化。
 class FfiOnnxSession implements OnnxSession {
   FfiOnnxSession._(this._runtime, this._session, this._inputNames,
-      this._outputNames, this._allocator);
+      this._outputNames, this._allocator, this._profiling);
 
   /// 用模型字节建会话。
   ///
@@ -30,11 +31,9 @@ class FfiOnnxSession implements OnnxSession {
   ///
   /// 代价是模型字节要过一次 Dart 堆。ASR 最大的包是 fp32 编码器（约 600 MB），
   /// 建会话本来就要把它读进内存，这一次拷贝在总量里是零头。
-  static FfiOnnxSession create(
-    OrtRuntime runtime,
-    Uint8List modelBytes,
-    Pointer<OrtSessionOptions> options,
-  ) {
+  static FfiOnnxSession create(OrtRuntime runtime, Uint8List modelBytes,
+      Pointer<OrtSessionOptions> options,
+      {bool profiling = false}) {
     final Pointer<OrtApi> api = runtime.api;
     final Pointer<Uint8> buffer = calloc<Uint8>(modelBytes.length);
     final Pointer<Pointer<OrtSession>> sessionOut =
@@ -66,6 +65,7 @@ class FfiOnnxSession implements OnnxSession {
         _ioNames(api, session, allocator, inputs: true),
         _ioNames(api, session, allocator, inputs: false),
         allocator,
+        profiling,
       );
     } finally {
       calloc.free(buffer);
@@ -76,6 +76,7 @@ class FfiOnnxSession implements OnnxSession {
   final OrtRuntime _runtime;
   final Pointer<OrtSession> _session;
   final Pointer<OrtAllocator> _allocator;
+  final bool _profiling;
 
   /// 模型声明的输入 / 输出名，按序。
   final List<String> _inputNames;
@@ -251,8 +252,33 @@ class FfiOnnxSession implements OnnxSession {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    _runtime.api.ref.ReleaseSession
-        .asFunction<void Function(Pointer<OrtSession>)>()(_session);
+    try {
+      if (_profiling) {
+        final api = _runtime.api;
+        final out = calloc<Pointer<Char>>();
+        try {
+          checkOrtStatus(
+              api,
+              api.ref.SessionEndProfiling.asFunction<
+                  Pointer<OrtStatus> Function(
+                      Pointer<OrtSession>,
+                      Pointer<OrtAllocator>,
+                      Pointer<Pointer<Char>>)>()(_session, _allocator, out));
+          stderr
+              .writeln('ORT profile: ${out.value.cast<Utf8>().toDartString()}');
+        } finally {
+          if (out.value != nullptr) {
+            api.ref.AllocatorFree.asFunction<
+                Pointer<OrtStatus> Function(Pointer<OrtAllocator>,
+                    Pointer<Void>)>()(_allocator, out.value.cast<Void>());
+          }
+          calloc.free(out);
+        }
+      }
+    } finally {
+      _runtime.api.ref.ReleaseSession
+          .asFunction<void Function(Pointer<OrtSession>)>()(_session);
+    }
   }
 
   // --- 内部 ---
