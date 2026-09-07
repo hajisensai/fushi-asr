@@ -37,6 +37,7 @@ import 'package:asr_core/src/asr/asr_transcribe_job.dart';
 import 'package:asr_core/src/asr/asr_transcription_service.dart';
 import 'package:asr_core/src/asr/asr_transducer_decoder.dart';
 import 'package:asr_core/src/asr/asr_types.dart';
+import 'package:asr_core/src/util/log.dart';
 import 'package:asr_core/src/asr/asr_vad.dart';
 import 'package:asr_core/src/onnx/onnx_inference.dart';
 
@@ -453,13 +454,18 @@ Future<void> _isolateMain(_IsolateArgs args) async {
   } catch (error, stack) {
     args.events.send(_ErrorMessage('$error', '$stack'));
   } finally {
+    asrShutdownTrace('isolate: closing sessions');
     try {
       await sessions?.close();
     } catch (_) {
       // 关会话失败没有可做的补救；退出本 isolate 即可。
     }
+    asrShutdownTrace('isolate: sessions closed');
     pcm.close();
+    asrShutdownTrace('isolate: pcm closed');
     args.events.send(const _ExitedMessage());
+    asrShutdownTrace('isolate: exited message sent');
     control.close();
   }
 }
+

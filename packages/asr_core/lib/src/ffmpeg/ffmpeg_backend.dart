@@ -227,7 +227,8 @@ abstract class FfmpegBackend {
 }
 
 /// 解析 ffmpeg 可执行文件（桌面 [CliFfmpegBackend] 用）。优先级：
-/// 1. `FUSHI_FFMPEG`（绝对路径，显式覆盖，开发/特殊部署）；
+/// 1. `ASR_FFMPEG`（绝对路径，显式覆盖，开发/特殊部署；旧名 `FUSHI_FFMPEG` /
+///    `HIBIKI_FFMPEG` 仍然认，宿主换名字不该让用户的既有配置失效）；
 /// 2. **app 程序旁捆绑的 `ffmpeg(.exe)`**（打包时塞进各桌面产物 → 开箱即用，不依赖
 ///    用户自己装 ffmpeg；否则没装 ffmpeg 的电脑会丢内封字幕/cue 动图/制卡音频）；
 /// 3. 回退系统 PATH 上的 `ffmpeg`。
@@ -244,13 +245,13 @@ String resolveFfmpegExecutable() => resolveFfmpegExecutableFrom(
 /// 哪个名字"只存在一处，这类错误就无处可写。
 String? ffmpegEnvOverride() => resolveEnvOverrideFrom(
       Platform.environment,
-      const <String>['FUSHI_FFMPEG', 'HIBIKI_FFMPEG'],
+      const <String>['ASR_FFMPEG', 'FUSHI_FFMPEG', 'HIBIKI_FFMPEG'],
     );
 
 /// ffprobe 版的 [ffmpegEnvOverride]（同样新名优先、旧名回退）。
 String? ffprobeEnvOverride() => resolveEnvOverrideFrom(
       Platform.environment,
-      const <String>['FUSHI_FFPROBE', 'HIBIKI_FFPROBE'],
+      const <String>['ASR_FFPROBE', 'FUSHI_FFPROBE', 'HIBIKI_FFPROBE'],
     );
 
 /// 纯函数：在 [env] 里按 [names] 的先后顺序取第一个**非空**值（新名在前、旧名在后）。

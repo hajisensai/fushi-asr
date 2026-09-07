@@ -1,0 +1,16 @@
+name: asr
+description: 语音识别生成字幕的门面包：核心 + FFI 后端 + 一步到位的转录器与字幕格式。
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+
+dependencies:
+  asr_core: ^0.1.0
+  asr_onnx_ffi: ^0.1.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

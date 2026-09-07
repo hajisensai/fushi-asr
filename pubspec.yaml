@@ -5,5 +5,8 @@ environment:
   sdk: ">=3.6.0 <4.0.0"
 
 workspace:
+  - packages/asr
+  - packages/asr_cli
   - packages/asr_core
   - packages/asr_onnx_ffi
+  - packages/asr_server

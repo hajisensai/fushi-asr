@@ -1,0 +1,15 @@
+name: asr_server
+description: asr 的 HTTP 服务端与客户端，自带一个最小网页界面。
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+
+dependencies:
+  asr: ^0.1.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

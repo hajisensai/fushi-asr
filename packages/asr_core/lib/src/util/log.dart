@@ -20,3 +20,19 @@ void _defaultSink(String message) {
 
 /// 写一行日志。
 void asrLog(String message) => asrLogSink(message);
+
+/// 关停 / 收尾阶段的诊断开关：`ASR_TRACE_SHUTDOWN=1` 时把每一步写 stderr。
+///
+/// 存在的理由是一次真事故：转录跑完之后连接不关，从客户端看只是「一直等」，
+/// 分不清卡在关会话、关 PCM 桥、退出消息没送到，还是服务端写响应时抛了。这几步
+/// 分别在三个文件里，各写一遍 env 判断只会漂移，所以收成一个开关。
+///
+/// 诊断用，生产不设。
+final bool kAsrTraceShutdown =
+    Platform.environment['ASR_TRACE_SHUTDOWN'] == '1';
+
+/// 关停阶段打一行（未开开关时什么都不做）。
+void asrShutdownTrace(String message) {
+  if (!kAsrTraceShutdown) return;
+  stderr.writeln('[asr-shutdown] $message');
+}
