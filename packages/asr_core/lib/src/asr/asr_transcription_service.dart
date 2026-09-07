@@ -152,13 +152,26 @@ class AsrTranscriptionService {
     this.greedySessions,
     this.greedyIntraOpThreads,
   })  : _backend = backend,
-        _loader = loader ?? AsrEngineLoader(factory: backend.buildFactory()),
+        _injectedLoader = loader,
         _pcm = pcm ?? FfmpegAsrPcmSource(),
         _openStore = openStore ?? AsrModelStore.open,
         _jobsRoot = jobsRoot ?? _defaultJobsRoot;
 
   final AsrIsolateBackend _backend;
-  final AsrEngineLoader _loader;
+
+  /// 注入的装载器；null 时按需从 [_backend] 现建（见 [_loader]）。
+  final AsrEngineLoader? _injectedLoader;
+  AsrEngineLoader? _lazyLoader;
+
+  /// 引擎装载器，**按需建**。
+  ///
+  /// 不能在构造函数里急切建：那会让「new 一个服务」隐含要求 ONNX 后端此刻就可用。
+  /// 实测代价是子类化这个服务来做 widget 测试时（覆写 plan/start、根本不碰引擎）
+  /// 照样会去建后端——11 条 UI 用例因此炸在构造函数里，错因还指向后端而不是测试。
+  /// 真正需要装载器的只有进程内路径；isolate 路径的装配整个走 [_backend]。
+  AsrEngineLoader get _loader =>
+      _injectedLoader ??
+      (_lazyLoader ??= AsrEngineLoader(factory: _backend.buildFactory()));
   final AsrPcmSource _pcm;
   final Future<AsrModelStore> Function(AsrLanguage language) _openStore;
   final Future<Directory> Function() _jobsRoot;
