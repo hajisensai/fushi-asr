@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
-import 'package:fushi_asr_core/asr_core.dart' show AsrCueTokenTiming, AudioTextNormalizer, NormalizedTextWithOffsets;
+import 'package:fushi_asr_core/asr_core.dart' show AsrCueTokenTiming;
+import 'package:fushi_asr_core/text.dart';
 
 import 'align_cue.dart';
 import 'epub_srt_matcher.dart';

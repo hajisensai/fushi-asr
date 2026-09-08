@@ -1,4 +1,5 @@
-import 'package:fushi_asr_core/asr_core.dart' show asrLog, AudioTextNormalizer, NormalizedTextWithOffsets;
+import 'package:fushi_asr_core/asr_core.dart' show asrLog;
+import 'package:fushi_asr_core/text.dart';
 import 'dart:math' as math;
 
 import 'package:meta/meta.dart';
