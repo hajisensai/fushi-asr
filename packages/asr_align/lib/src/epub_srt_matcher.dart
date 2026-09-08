@@ -1,9 +1,7 @@
-import 'package:fushi_asr_core/asr_core.dart' show asrLog;
+import 'package:fushi_asr_core/asr_core.dart' show asrLog, AudioTextNormalizer, NormalizedTextWithOffsets;
 import 'dart:isolate';
 import 'dart:typed_data';
-import 'package:meta/meta.dart';
 import 'anchor_gap_filler.dart';
-import 'audio_text_normalizer.dart';
 import 'align_cue.dart';
 
 /// EPUB 一个章节，供 [EpubSrtMatcher] 使用。

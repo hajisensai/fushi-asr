@@ -1,0 +1,15 @@
+name: fushi_asr_subtitles
+description: Subtitle formats, retiming against ASR transcripts, and the clock model behind it.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+
+dependencies:
+  fushi_asr_core: ^0.1.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

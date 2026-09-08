@@ -5,14 +5,28 @@ library;
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:fushi_asr_align/asr_align.dart' show AudioTextNormalizer;
-import 'package:fushi_asr_core/asr_core.dart' show AsrCueTokenTiming;
+import 'package:fushi_asr_core/asr_core.dart'
+    show AsrCueTokenTiming, AudioTextNormalizer;
 
 import 'cancellation.dart';
 import 'subtitle_format.dart';
 import 'subtitle_speech_text.dart';
 import 'subtitle_clock.dart';
-import 'transcribe_runner.dart';
+
+/// 重定时要拿来当参照的那份转录。
+///
+/// 只要 cue 列表与可选的逐 token 发射时间——**不要**换成具体的转录结果类型：
+/// 那会把 ONNX 后端（runner、session、execution provider）拖进这个纯算法包，
+/// 而 Flutter 宿主用的是插件后端、根本装不下那套依赖。本仓的
+/// `TranscribeOutcome` 直接 implements 本接口，别处产的转录自己实现一个即可。
+abstract class RetimingTranscription {
+  /// ASR 识别出的 cue，按 [SubtitleCue.startMs] 非降序。
+  List<SubtitleCue> get cues;
+
+  /// 与 [cues] 一一对应的逐 token 发射时间；长度对不上时整份忽略
+  /// （错位的 token 时间比没有更糟）。
+  List<AsrCueTokenTiming>? get tokenTimings;
+}
 
 const int maxSubtitleBytes = 8 * 1024 * 1024;
 const int _maxCues = 20000;
@@ -140,13 +154,13 @@ class RetimedSubtitles {
 /// forced alignment. Only unambiguous monotonic text matches become anchors;
 /// unmatched cues are estimated inside bounded anchor gaps or left untouched.
 Future<RetimedSubtitles> retimeSubtitles(List<SubtitleCue> subtitles,
-        TranscribeOutcome transcription, SubtitleFormat format,
+        RetimingTranscription transcription, SubtitleFormat format,
         {TranscribeCancellation? cancellation}) =>
     cancellableCompute(
         _retimingTask(subtitles, transcription, format), cancellation);
 
 RetimedSubtitles Function() _retimingTask(List<SubtitleCue> subtitles,
-        TranscribeOutcome transcription, SubtitleFormat format) =>
+        RetimingTranscription transcription, SubtitleFormat format) =>
     () => _retime(subtitles, transcription, format);
 
 String _normalize(String text) {
@@ -194,7 +208,7 @@ void _validateCues(List<SubtitleCue> cues, {required bool input}) {
 }
 
 RetimedSubtitles _retime(List<SubtitleCue> subtitles,
-    TranscribeOutcome transcription, SubtitleFormat format) {
+    RetimingTranscription transcription, SubtitleFormat format) {
   final watch = Stopwatch()..start();
   _validateCues(subtitles, input: true);
   _validateCues(transcription.cues, input: false);
@@ -486,7 +500,7 @@ class _Anchor extends _Span {
 /// Only known segment/token boundaries are addressable. Characters inside one
 /// token deliberately have no timestamp; no uniform speech rate is invented.
 class _Timeline {
-  _Timeline(TranscribeOutcome original) {
+  _Timeline(RetimingTranscription original) {
     final textParts = <String>[];
     var offset = 0;
     var previousStart = -1;

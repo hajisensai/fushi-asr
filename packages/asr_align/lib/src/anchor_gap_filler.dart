@@ -1,10 +1,9 @@
-import 'package:fushi_asr_core/asr_core.dart' show asrLog;
+import 'package:fushi_asr_core/asr_core.dart' show asrLog, AudioTextNormalizer, NormalizedTextWithOffsets;
 import 'dart:math' as math;
 
 import 'package:meta/meta.dart';
 
 import 'align_cue.dart';
-import 'audio_text_normalizer.dart';
 import 'epub_srt_matcher.dart';
 
 /// 锚点间隙回填：把 Dice 匹配器漏掉的、夹在两条命中 cue 之间的 cue 对齐到

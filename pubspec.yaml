@@ -10,4 +10,5 @@ workspace:
   - packages/asr_cli
   - packages/asr_core
   - packages/asr_onnx_ffi
+  - packages/asr_subtitles
   - packages/asr_server
