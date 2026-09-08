@@ -51,12 +51,25 @@ List<(String, String)> webUiLangs(Directory root) {
 }
 
 const String kNavComment =
-    '<!-- Language nav: order matches LANGS in the web UI i18n; guarded by readme_i18n_test.dart -->';
+    '<!-- Language nav: English first (the default), then the web UI i18n LANGS order; guarded by readme_i18n_test.dart -->';
+
+/// 导航顺序：英文打头，其余沿用 `LANGS`。
+///
+/// 不直接照搬 `LANGS`：那份顺序把简体中文放第一，因为界面文案的**源语言**是中文。
+/// README 的默认语言是英文（仓库根那份就是它），默认语言却排在第三位是自相矛盾的，
+/// 读者按顺序找「原版」会先撞上中文。
+List<(String, String)> navOrder(List<(String, String)> langs) => <(
+  String,
+  String,
+)>[
+  ...langs.where(((String, String) l) => l.$1 == 'en'),
+  ...langs.where(((String, String) l) => l.$1 != 'en'),
+];
 
 /// 某语言 README 该有的导航行。`en` 在仓库根，其余在 `docs/readme/`。
 String navLine(List<(String, String)> langs, String current) {
   final List<String> parts = <String>[];
-  for (final (String code, String name) in langs) {
+  for (final (String code, String name) in navOrder(langs)) {
     if (code == current) {
       parts.add('**$name**');
     } else if (code == 'en') {
@@ -143,6 +156,11 @@ void main() {
   final String english = File(readmePath(root, 'en')).readAsStringSync();
   final List<CodeBlock> englishBlocks = codeBlocks(english);
   final List<int> englishHeadings = headingLevels(english);
+
+  test('导航第一个就是默认语言英文', () {
+    expect(navOrder(langs).first.$1, 'en');
+    expect(english.split('\n')[1], startsWith('**English** ·'));
+  });
 
   test('英文 README 是仓库根的那一份，且有实打实的内容可比', () {
     expect(langs.map((l) => l.$1), contains('en'));
