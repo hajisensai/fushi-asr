@@ -18,6 +18,8 @@ try {
     write: false, outdir: scratch, format: 'iife', minify: true,
     charset: 'utf8', target: ['es2022'], jsx: 'automatic',
     define: { 'process.env.NODE_ENV': '"production"' },
+    // The logo has to travel inside the single HTML file: no second request is allowed.
+    loader: { '.png': 'dataurl' },
     plugins: [{ name: 'css-is-compiled-by-tailwind', setup(b) {
       b.onLoad({ filter: /\.css$/ }, () => ({ contents: '', loader: 'css' }));
     } }],

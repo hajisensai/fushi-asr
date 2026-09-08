@@ -1,10 +1,60 @@
 # Local UI development
 
-This is a React 19 + shadcn/ui (Radix Nova) + Tailwind CSS 4 UI inspired by
-OpenWebUI's layout, not an OpenWebUI server integration. Components are installed
-from the official shadcn registry and owned in `src/components/ui`. The existing
-Dart ASR/EPUB backend is retained, with per-task cancellation added. The production bundle includes React and all
-UI code: no Python service, remote fonts, CDN, or external UI requests.
+This is a React 19 + shadcn/ui (Radix Nova) + Tailwind CSS 4 UI. Components are
+installed from the official shadcn registry and owned in `src/components/ui`. The
+existing Dart ASR/EPUB backend is retained, with per-task cancellation added. The
+production bundle includes React, the interface dictionaries and the logo: no
+Python service, remote fonts, CDN, or external UI requests.
+
+## Design source
+
+The look comes from the Fushi website, `hajisensai/fushi.moe`. `styles.css` copies
+that site's `public/chrome.css`: the same Apple-grammar tokens (`--ground`, `--ink`,
+`--hairline`, `--link`, `--accent`), the same sticky blurred `.site-nav`, the same
+pill `.btn`, `.site-nav-lang` menu, `.site-footer` and `.site-totop`, and the same
+type scale. Those tokens are mapped onto the shadcn variable names, so registry
+components inherit the site palette without being edited one by one. The markup
+shapes live in `src/components/site-chrome.tsx`; when the website changes its
+chrome, change both files. The workbench is not a page of that site — it runs on
+the local server and ships as one offline HTML file — so the CSS is copied rather
+than linked.
+
+Three deliberate departures:
+
+- The top bar carries the two working modes instead of the site's community links,
+  and they are a segmented pill, not text links: this bar is the mode switch, so it
+  has to read as "two choices, you are in one". Text links styled like the site's
+  community entries got mistaken for decoration and the retiming mode went unfound.
+  The pill is visible at every width - below 1000px it drops the labels and keeps
+  the icons (the accessible name stays) instead of hiding behind a hamburger. It
+  locks while a task runs.
+- The dark toggle is kept, using the site's own dark-band tokens rather than a new
+  set of greys.
+- `scrollbar-gutter: stable` is deliberately *not* copied. The site needs it because
+  its own scroll lock only sets `body { overflow: hidden }`; Radix, which powers the
+  selects here, restores the width it takes away. Doing both compensates twice and
+  the top bar's right edge jumps 15 px every time a dropdown opens.
+
+## Interface language
+
+17 languages, the same set and order as the website and the app. `src/lib/i18n.ts`
+holds the store (`LANGS`, `matchTag`, `detect`, `initialLanguage`, `t`) and imports
+nothing, so `node --test` can run it and everything downstream; `src/lib/i18n-react.ts`
+is the React binding. `src/i18n/zh-CN.ts` is the source dictionary and its key set
+*is* the `Dict` type, so a missing or stray key in any of the other 16 fails
+`tsc`; `src/lib/i18n.test.ts` additionally checks that placeholders match and that
+no translation is blank.
+
+Dictionaries are bundled, not fetched: an offline single file may not download
+anything at runtime. That also means there is no flash of the source language, so
+the website's `i18n-pending` trick is unnecessary. Selection order follows the site:
+`?lang=` → the remembered choice → `navigator.languages`, falling back to English.
+The chosen language sets `<html lang>`/`dir` and the document title; Arabic renders
+right-to-left. Any failure degrades to the source language, never to a blank page.
+
+Status lines are stored as keys, not finished sentences, so switching language
+re-renders them instead of leaving the previous language on screen. Error text that
+embeds an exception message is translated when it is raised.
 
 With Node.js 24+ (tests use native TypeScript stripping):
 
@@ -19,7 +69,9 @@ npm run build
 Then run `./script/build_and_run.sh` from the repository root. The Run action
 builds the Dart/Swift server with the checked-in `lib/src/web_ui.g.dart` bundle.
 Rebuild that bundle after editing `index.html`, `styles.css`, `src/`, or
-`progress.js`. Commit source and generated bundle together. Node and Tailwind
+`progress.js`. Commit source and generated bundle together. `src/assets/fushi-icon.png`
+is the site logo downscaled to 160 px and inlined as a data URI by esbuild; it is
+both the brand mark and the tab icon, so no second request is made for either. Node and Tailwind
 are development-only dependencies; Windows builds can use the same bundle.
 
 `npm run dev` runs the Vite frontend with `/v1` proxied to the Dart server at
@@ -30,10 +82,10 @@ Both file controls are drag-and-drop zones. They support click/keyboard file
 selection through hidden inputs, replacement, and removal. Wrong type, empty,
 oversized, or multiple files are rejected without replacing a valid selection.
 Inputs are disabled while processing; EPUB is also disabled in audio-only mode.
-The sidebar switches between subtitle generation and subtitle retiming. On narrow
-screens the top-bar navigation button opens a Sheet. File selections and previous
-results survive mode changes; navigation is locked while a task is running.
-New task and theme controls live in the top bar.
+The top bar's segmented control switches between subtitle generation and subtitle
+retiming, at every screen width. File selections and previous results survive mode
+changes; the switch is locked while a task is running. Language, theme and new task
+live in the top bar.
 
 Retiming accepts an existing UTF-8 SRT/WebVTT file (up to 8 MiB) plus audio/video,
 and submits `subtitle` + `audio` multipart to `/v1/retime`. The original subtitle
@@ -80,4 +132,5 @@ the button; no backend is silently relabelled as CoreML.
   in-memory results; download anything you want to keep.
 
 Source references: [Tailwind CLI](https://tailwindcss.com/docs/installation/tailwind-cli),
-[OpenWebUI](https://github.com/open-webui/open-webui). No OpenWebUI source copied.
+[fushi.moe](https://github.com/hajisensai/fushi.moe) for the site chrome and the
+language set.
