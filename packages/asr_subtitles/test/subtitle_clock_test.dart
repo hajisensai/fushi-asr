@@ -1,4 +1,4 @@
-import 'package:fushi_asr/src/subtitle_clock.dart';
+import 'package:fushi_asr_subtitles/asr_subtitles.dart';
 import 'package:test/test.dart';
 
 SubtitleClockAnchor anchor(int source, int shift, int cue) =>

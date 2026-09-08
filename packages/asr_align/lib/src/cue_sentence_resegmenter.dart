@@ -1,9 +1,8 @@
 import 'dart:math' as math;
 
-import 'package:fushi_asr_core/asr_core.dart' show AsrCueTokenTiming;
+import 'package:fushi_asr_core/asr_core.dart' show AsrCueTokenTiming, AudioTextNormalizer, NormalizedTextWithOffsets;
 
 import 'align_cue.dart';
-import 'audio_text_normalizer.dart';
 import 'epub_srt_matcher.dart';
 
 /// 命中 cue 按**正文句界**重切（设备端转录产物专用）。

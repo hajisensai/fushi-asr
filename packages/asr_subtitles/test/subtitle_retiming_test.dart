@@ -1,20 +1,25 @@
 import 'dart:convert';
 
-import 'package:fushi_asr/asr.dart';
+import 'package:fushi_asr_core/asr_core.dart' show AsrCueTokenTiming;
+import 'package:fushi_asr_subtitles/asr_subtitles.dart';
 import 'package:test/test.dart';
 
 SubtitleCue cue(String text, int start, int end, {int index = 1}) =>
     SubtitleCue(index: index, startMs: start, endMs: end, text: text);
 
-TranscribeOutcome asr(List<SubtitleCue> cues,
+class _Transcription implements RetimingTranscription {
+  const _Transcription(this.cues, this.tokenTimings);
+
+  @override
+  final List<SubtitleCue> cues;
+
+  @override
+  final List<AsrCueTokenTiming>? tokenTimings;
+}
+
+RetimingTranscription asr(List<SubtitleCue> cues,
         {List<AsrCueTokenTiming>? tokens}) =>
-    TranscribeOutcome(
-      text: '',
-      cues: cues,
-      tokenTimings: tokens,
-      elapsed: Duration.zero,
-      audioMs: cues.isEmpty ? 0 : cues.last.endMs,
-    );
+    _Transcription(cues, tokens);
 
 void main() {
   group('parseRetimingSubtitles', () {

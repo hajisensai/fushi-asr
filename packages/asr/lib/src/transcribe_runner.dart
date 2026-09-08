@@ -11,8 +11,8 @@ import 'dart:isolate';
 import 'package:fushi_asr_core/asr_core.dart';
 import 'package:fushi_asr_onnx_ffi/asr_onnx_ffi.dart';
 
-import 'package:fushi_asr/src/subtitle_format.dart';
-import 'cancellation.dart';
+import 'package:fushi_asr_subtitles/asr_subtitles.dart';
+
 
 part 'coreml_worker.dart';
 
@@ -43,7 +43,7 @@ class TranscribeProgress {
 }
 
 /// 转录结果。
-class TranscribeOutcome {
+class TranscribeOutcome implements RetimingTranscription {
   const TranscribeOutcome({
     required this.text,
     required this.cues,
@@ -57,6 +57,7 @@ class TranscribeOutcome {
 
   /// 按请求格式渲染好的字幕文本。
   final String text;
+  @override
   final List<SubtitleCue> cues;
 
   /// 编码器真正落到的 EP（含降级后的结果）。
@@ -64,6 +65,7 @@ class TranscribeOutcome {
 
   /// Native engines do not have an ONNX execution provider.
   final String engine;
+  @override
   final List<AsrCueTokenTiming>? tokenTimings;
 
   /// Diagnostic elapsed timings; asynchronous stages may overlap.

@@ -29,6 +29,8 @@ export 'src/asr/asr_transducer_decoder.dart';
 export 'src/asr/asr_types.dart';
 export 'src/asr/asr_vad.dart';
 export 'src/ffmpeg/ffmpeg_backend.dart';
+export 'src/text/audio_text_normalizer.dart';
+export 'src/text/jp_codepoint_fold.dart';
 export 'src/onnx/model_file_downloader.dart';
 export 'src/onnx/onnx_inference.dart';
 export 'src/onnx/onnx_proto.dart';
