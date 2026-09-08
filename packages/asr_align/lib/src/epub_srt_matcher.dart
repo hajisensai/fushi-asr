@@ -1,4 +1,5 @@
-import 'package:fushi_asr_core/asr_core.dart' show asrLog, AudioTextNormalizer, NormalizedTextWithOffsets;
+import 'package:fushi_asr_core/asr_core.dart' show asrLog;
+import 'package:fushi_asr_core/text.dart';
 import 'dart:isolate';
 import 'dart:typed_data';
 import 'anchor_gap_filler.dart';
