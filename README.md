@@ -41,7 +41,7 @@ fushi-subs transcribe -l ja --server http://192.168.1.10:8642 audiobook.m4b -o o
 
 | 依赖 | 说明 |
 |---|---|
-| **ONNX Runtime** | `onnxruntime.dll` / `libonnxruntime.so` / `libonnxruntime.dylib`（1.22+）。查找顺序：`ASR_ONNXRUNTIME_LIB` 环境变量 → 可执行文件同级目录 → 系统搜索路径。Windows 上还需要 Microsoft Visual C++ Redistributable。 |
+| **ONNX Runtime** | `onnxruntime.dll` / `libonnxruntime.so` / `libonnxruntime.dylib`（**1.22+**，低于此版本 `GetApi(22)` 返回 nullptr、装了也用不了）。查找顺序：`ASR_ONNXRUNTIME_LIB` 环境变量 → 按需下载的托管副本 → 可执行文件同级目录 → 系统搜索路径。**Windows 上找不到可用版本时自动下载**（NuGet 的 `Microsoft.ML.OnnxRuntime.DirectML`，17.9 MB，sha256 钉死，落 `<数据根>/asr_runtime/`）；下 DirectML 那份而不是 GitHub release 的纯 CPU 包，否则 GPU 加速会静默消失。`DirectML.dll` 用 Windows 自带的系统组件。另需 Microsoft Visual C++ Redistributable。macOS 走 `script/bootstrap_macos.sh`，Linux 用发行版包管理器。 |
 | **ffmpeg** | 用来把任意音视频解成 16 kHz 单声道 PCM。查找顺序：`ASR_FFMPEG` → 可执行文件同级 → PATH。`ffprobe` 可选（缺了只是探不出总时长，进度百分比会不准）。 |
 
 其它环境变量：`ASR_DATA_DIR`（模型与任务目录的根）、`ASR_MODELS_MANIFEST`（自带模型清单）。

@@ -8,6 +8,7 @@ environment:
   sdk: ">=3.6.0 <4.0.0"
 
 dependencies:
+  archive: ^4.0.0
   crypto: ^3.0.0
   fushi_asr_core: ^0.1.0
   ffi: ^2.1.0

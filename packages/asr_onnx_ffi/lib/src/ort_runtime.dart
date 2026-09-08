@@ -77,64 +77,90 @@ class OrtRuntime {
         ? <String>[override]
         : resolveLibraryCandidates();
     final List<String> attempted = <String>[];
-    DynamicLibrary? lib;
-    Object? lastError;
-    for (final String candidate in candidates) {
-      attempted.add(candidate);
-      try {
-        lib = DynamicLibrary.open(candidate);
-        break;
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    if (lib == null) {
+    final _UsableOrt? picked = selectUsableCandidate<_UsableOrt>(
+        candidates, probeCandidate, attempted);
+    if (picked == null) {
       throw OrtRuntimeUnavailable(
-        'onnxruntime 动态库打不开：$lastError'
-        '${Platform.isWindows ? "（Windows 上最常见的原因是缺 Microsoft Visual "
-            "C++ Redistributable —— onnxruntime.dll 静态依赖 MSVCP140.dll）" : ""}',
+        'onnxruntime 动态库不可用'
+        '${Platform.isWindows ? "（Windows 上两种常见原因：一是缺 Microsoft Visual "
+            "C++ Redistributable —— onnxruntime.dll 静态依赖 MSVCP140.dll；"
+            "二是只搜到系统目录里那份旧 ORT，用 ASR_ONNXRUNTIME_LIB 指向 1.22 "
+            "或更新的一份）" : ""}',
         attempted: attempted,
       );
     }
-    final OnnxRuntimeBindings bindings = OnnxRuntimeBindings(lib);
-    final Pointer<OrtApiBase> base = bindings.OrtGetApiBase();
-    if (base == nullptr) {
-      throw OrtRuntimeUnavailable('OrtGetApiBase 返回空', attempted: attempted);
-    }
-    final Pointer<OrtApi> api =
-        base.ref.GetApi.asFunction<Pointer<OrtApi> Function(int)>()(
-      kOrtApiVersion,
-    );
-    if (api == nullptr) {
-      // ORT 对版本不支持的回应是 nullptr，不是抛错。不判这一下就会在第一次调用时
-      // 空指针崩，堆栈里看不出真正原因。
-      final Pointer<Char> version = base.ref.GetVersionString
-          .asFunction<Pointer<Char> Function()>()();
-      throw OrtRuntimeUnavailable(
-        '这份 onnxruntime（${version == nullptr ? "版本未知" : version.cast<Utf8>().toDartString()}）'
-        '不支持 API 版本 $kOrtApiVersion，需要 1.22 或更新',
-        attempted: attempted,
-      );
-    }
+    final OnnxRuntimeBindings bindings = picked.bindings;
+    final Pointer<OrtApi> api = picked.api;
     final Pointer<Pointer<OrtEnv>> envOut = calloc<Pointer<OrtEnv>>();
     final Pointer<Utf8> logId = 'asr'.toNativeUtf8();
     try {
       final Pointer<OrtStatus> status = api.ref.CreateEnv.asFunction<
           Pointer<OrtStatus> Function(
-        int,
-        Pointer<Char>,
-        Pointer<Pointer<OrtEnv>>,
-      )>()(
+            int,
+            Pointer<Char>,
+            Pointer<Pointer<OrtEnv>>,
+          )>()(
         OrtLoggingLevel.ORT_LOGGING_LEVEL_WARNING.value,
         logId.cast<Char>(),
         envOut,
       );
       checkOrtStatus(api, status);
-      return OrtRuntime._(bindings, api, envOut.value, attempted.last);
+      return OrtRuntime._(bindings, api, envOut.value, picked.path);
     } finally {
       calloc.free(logId);
       calloc.free(envOut);
     }
+  }
+
+  /// 在候选里挑第一个**真能用**的，每个失败候选的原因逐条记进 [failures]。
+  ///
+  /// 判据必须是「打得开 **且** `GetApi(kOrtApiVersion)` 非空」，不能只看 open。
+  /// Windows 的 `C:\Windows\System32` 里就躺着一份随系统/驱动装的旧 ORT
+  /// （实测 1.17.1），裸库名恒定先搜到它。只以 open 成功为准就会在那里 break，
+  /// 把整条候选链毒死——后面真正可用的运行时永远轮不到，用户看到的是「不支持
+  /// API 版本 22」而不是「继续找下一个」。
+  static T? selectUsableCandidate<T>(
+    List<String> candidates,
+    (T?, String?) Function(String candidate) probe,
+    List<String> failures,
+  ) {
+    for (final String candidate in candidates) {
+      final (T? value, String? failure) = probe(candidate);
+      if (value != null) return value;
+      failures.add('$candidate：${failure ?? "未知原因"}');
+    }
+    return null;
+  }
+
+  /// 探一个候选：装上并要到与本包绑定匹配的 `OrtApi` 才算数。
+  static (_UsableOrt?, String?) probeCandidate(String candidate) {
+    final DynamicLibrary lib;
+    try {
+      lib = DynamicLibrary.open(candidate);
+    } catch (error) {
+      return (null, '打不开（$error）');
+    }
+    // Dart 没有 DynamicLibrary.close：版本不合的库会留在进程里（一个模块句柄）。
+    // 换下一个候选比让它毒死整条链划算。
+    final OnnxRuntimeBindings bindings = OnnxRuntimeBindings(lib);
+    final Pointer<OrtApiBase> base = bindings.OrtGetApiBase();
+    if (base == nullptr) return (null, 'OrtGetApiBase 返回空');
+    final Pointer<OrtApi> api =
+        base.ref.GetApi.asFunction<Pointer<OrtApi> Function(int)>()(
+      kOrtApiVersion,
+    );
+    if (api == nullptr) {
+      // ORT 对版本不支持的回应是 nullptr，不是抛错。不判这一下就会在第一次调用
+      // 时空指针崩，堆栈里看不出真正原因。
+      final Pointer<Char> version =
+          base.ref.GetVersionString.asFunction<Pointer<Char> Function()>()();
+      return (
+        null,
+        '版本 ${version == nullptr ? "未知" : version.cast<Utf8>().toDartString()}'
+            '，不支持 API 版本 $kOrtApiVersion（需要 1.22 或更新）'
+      );
+    }
+    return (_UsableOrt(bindings, api, candidate), null);
   }
 
   /// 按序给出候选库路径。
@@ -144,16 +170,32 @@ class OrtRuntime {
   /// 3. 裸库名：交给系统搜索路径。
   ///
   /// 与 ffmpeg 的解析顺序同范式（环境变量 > 捆绑 > 系统）。
+  /// 按需下载装到的目录（`ensureOrtRuntime()` 写入）。
+  ///
+  /// 做成可变静态而不是把路径一路传进来：数据根是**异步**解析的
+  /// （`asrSupportRootDirectory()`），而候选序列必须同步给出。与
+  /// `asrSupportRootResolver` 同一种装配手法。null = 没有托管副本。
+  static String? managedRuntimeDir;
+
+  /// 候选序列：显式指定 > 按需下载的托管副本 > 可执行文件同级 > 系统搜索路径。
+  ///
+  /// 托管副本排在系统搜索路径前面是有意的：那份是我们按版本下的、判据过了的，
+  /// 而裸库名在 Windows 上恒定先撞上 `C:\Windows\System32` 里随系统/驱动装
+  /// 的旧 ORT。让已知好的那份先被试到，省掉每次启动都白探一遍旧库。
   static List<String> resolveLibraryCandidates({
     Map<String, String>? environment,
     String? executablePath,
+    String? managedDir,
   }) {
     final Map<String, String> env = environment ?? Platform.environment;
     final String bare = defaultLibraryFileName();
     final String? override = env['ASR_ONNXRUNTIME_LIB'];
     final String exe = executablePath ?? Platform.resolvedExecutable;
+    final String? managed = managedDir ?? managedRuntimeDir;
     return <String>[
       if (override != null && override.trim().isNotEmpty) override.trim(),
+      if (managed != null && managed.trim().isNotEmpty)
+        p.join(managed.trim(), bare),
       p.join(p.dirname(exe), bare),
       bare,
     ];
@@ -184,7 +226,14 @@ void checkOrtStatus(Pointer<OrtApi> api, Pointer<OrtStatus> status) {
       .asFunction<Pointer<Char> Function(Pointer<OrtStatus>)>()(status);
   final String text =
       message == nullptr ? '(no message)' : message.cast<Utf8>().toDartString();
-  api.ref.ReleaseStatus
-      .asFunction<void Function(Pointer<OrtStatus>)>()(status);
+  api.ref.ReleaseStatus.asFunction<void Function(Pointer<OrtStatus>)>()(status);
   throw OrtException(code, text);
+}
+
+/// 一个通过版本判据的候选。
+class _UsableOrt {
+  _UsableOrt(this.bindings, this.api, this.path);
+  final OnnxRuntimeBindings bindings;
+  final Pointer<OrtApi> api;
+  final String path;
 }
