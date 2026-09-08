@@ -416,7 +416,7 @@ class ServeCommand extends Command<int> {
         host: argResults!['host'] as String,
         port: port,
       );
-      stderr.writeln('asr 服务端已启动：$uri');
+      stderr.writeln('fushi-subs 服务端已启动：$uri');
       stderr.writeln('界面：$uri　　API：${uri}v1/transcribe');
       await ProcessSignal.sigint.watch().first;
       stderr.writeln('\n收到 SIGINT，停止服务');

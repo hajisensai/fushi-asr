@@ -182,8 +182,30 @@ class TranscribeRunner implements TranscribeService {
       }
     }
 
+    // ONNX Runtime 必须在任何会用到它的东西之前就位：plan() 要探 EP，推理
+    // isolate 要装模型，两者都得先有动态库。Windows 上缺库、或只搜得到系统
+    // 目录那份旧 ORT 时按需下载（17.9 MB，带 DirectML EP）。进度按模型下载
+    // 同一个契约回报，前端不用认第二种事件；已有可用运行时时这一步不发事件、
+    // 也不访问网络。
+    cancellation?.throwIfCancelled();
+    await for (final ModelDownloadEvent e in ensureOrtRuntime()) {
+      cancellation?.throwIfCancelled();
+      onProgress?.call(TranscribeProgress(
+        phase: 'download',
+        processedMs: e.receivedBytes,
+        totalMs: e.totalBytes,
+        detail: 'ONNX Runtime $kOrtPackageVersion（${e.fileName}）',
+      ));
+    }
+
     final AsrTranscriptionService service = AsrTranscriptionService(
-      backend: const AsrIsolateBackend(buildFactory: buildFfiOnnxFactory),
+      // managedRuntimeDir 是 per-isolate 静态字段，过不了边界：不把它显式
+      // 送进去，推理 isolate 会重新解析候选并撞回系统目录里的旧 ORT。
+      backend: AsrIsolateBackend(
+        buildFactory: buildFfiOnnxFactory,
+        bootstrap: adoptOrtManagedRuntimeDir,
+        bootstrapArg: OrtRuntime.managedRuntimeDir,
+      ),
       loader: sessionFactory == null
           ? null
           : AsrEngineLoader(factory: sessionFactory),
