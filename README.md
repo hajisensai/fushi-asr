@@ -135,6 +135,18 @@ back as the last line.
 
 ## Package layout
 
+Flutter hosts can enable `AsrTranscriptionService(alignGeneratedSubtitles: true)`
+to align recognized text against the original audio in a second model pass.
+For transducer recognition this loads the shared Omnilingual int8 CTC model on CPU;
+CTC recognition reuses its loaded model. Both paths run fresh inference for
+each speech segment, and uses forced alignment to update token start/end times
+before checkpoints, SRT and timing sidecars are written. Text is preserved;
+unsupported text or failed alignment produces an error, not an unaligned result.
+Plans expose `alignmentModelStatus`, `totalModelBytes` and `obtainedModelBytes`,
+and `downloadModel` downloads both required models. Aligned jobs use a separate
+cache identity. This adds model storage, runtime memory and processing time.
+The option is off by default for existing library consumers.
+
 | Package | Contents | Depends on |
 |---|---|---|
 | `fushi_asr_core` | The pure-Dart transcription core: VAD segmentation, fbank, RNN-T greedy Loop graph / CTC decoding, batching and bucketing, fp16 graph conversion, model manifest and downloads, SRT output. **No Flutter, no dart:ffi, no bundled ONNX backend** | `meta` `path` `crypto` |
