@@ -61,13 +61,35 @@ class AsrServer {
   final AsrModelRegistry registry;
   final List<TranscribeBackend>? backends;
 
+  /// 按 BCP-47 tag 找已注册语言；未知返回 null（调用方回 400，不猜）。
+  AsrLanguage? _languageByTag(String? tag) {
+    if (tag == null || tag.isEmpty) return null;
+    for (final AsrLanguage l in registry.languages) {
+      if (l.tag == tag) return l;
+    }
+    return null;
+  }
+
+  /// 按后端 id 取执行服务；未指定或未知时用默认 runner（与转录路径同一判据）。
+  TranscribeService _serviceFor(String? engineId) {
+    if (engineId == null || engineId.isEmpty) return runner;
+    for (final TranscribeBackend b in _backends) {
+      if (b.id == engineId) return b.service;
+    }
+    return runner;
+  }
+
   List<TranscribeBackend> get _backends =>
       backends ??
       [
+        // 展示文案**不在这里定语言**：web 前端按 id 查自己的 17 语言字典
+        // （engine.default / engineDesc.default），这两个字段只是非 web 客户端
+        // （CLI、第三方调用方）的兜底，所以写中性英文而不是某一种界面语言。
+        // 之前这里是中文字面量，界面切成任何语言都跟着显示中文。
         TranscribeBackend(
             id: 'default',
-            name: 'ReazonSpeech · 服务器默认',
-            description: '使用服务器配置的执行后端',
+            name: 'ReazonSpeech · server default',
+            description: 'Uses the execution backend configured on the server',
             service: runner,
             languages: registry.languages.map((l) => l.tag).toList())
       ];
@@ -177,6 +199,115 @@ class AsrServer {
         });
         return;
       }
+      // 「这个语言现在会怎么跑」——模型下全了没、缺多少字节、会落到哪个执行
+      // 后端、EP 探测有没有失败。**在开始转录之前**就能回答，这样用户不必靠
+      // 「等了很久」去猜自己是不是掉进了 CPU 路径或正在后台下模型。
+      if (path == '/v1/models/status' && request.method == 'GET') {
+        final String? tag = request.uri.queryParameters['language'];
+        final AsrLanguage? language = _languageByTag(tag);
+        if (language == null) {
+          response.statusCode = HttpStatus.badRequest;
+          await _json(response, <String, Object?>{
+            'error': 'unknown language: ${tag ?? ''}',
+          });
+          return;
+        }
+        final TranscribeService service = _serviceFor(
+          request.uri.queryParameters['engine'],
+        );
+        // 显式取能力对象而不是靠类型提升：ModelProvisioning 不是
+        // TranscribeService 的子类型，`is!` 之后 Dart 不会把变量提升成交集类型。
+        final ModelProvisioning? provisioning =
+            service is ModelProvisioning ? service as ModelProvisioning : null;
+        if (provisioning == null) {
+          // 没有这能力的后端（如系统托管的 Apple SpeechTranscriber）不是错误，
+          // 只是无需下载。前端据此隐藏下载入口，而不是显示一个永远点不动的按钮。
+          await _json(response, <String, Object?>{
+            'language': language.tag,
+            'managed': true,
+            'ready': true,
+          });
+          return;
+        }
+        final AsrTranscribePlan plan =
+            await provisioning.planFor(language: language);
+        await _json(response, <String, Object?>{
+          'language': language.tag,
+          'managed': false,
+          'ready': plan.modelReady,
+          'variant': plan.variant.name,
+          'provider': plan.expectedProvider.name,
+          'totalBytes': plan.totalModelBytes,
+          'obtainedBytes': plan.obtainedModelBytes,
+          'bytesToDownload': plan.bytesToDownload,
+          // 非空 = EP 探测失败、这次会按 CPU 跑。这是「有 GPU 也可能退成 CPU」
+          // 那条真实降级路径，藏起来就等于让用户对着一场慢转录猜原因。
+          if (plan.probeError != null) 'probeError': plan.probeError,
+        });
+        return;
+      }
+
+      // 预下载：选模型时就把该语言要用的东西下全（ORT 运行时 + 模型权重），
+      // 逐文件回报字节进度。与转录中的按需下载走同一条实现，只是提前触发。
+      if (path == '/v1/models/pull' && request.method == 'POST') {
+        final String? tag = request.uri.queryParameters['language'];
+        final AsrLanguage? language = _languageByTag(tag);
+        if (language == null) {
+          response.statusCode = HttpStatus.badRequest;
+          await _json(response, <String, Object?>{
+            'error': 'unknown language: ${tag ?? ''}',
+          });
+          return;
+        }
+        final TranscribeService service = _serviceFor(
+          request.uri.queryParameters['engine'],
+        );
+        // 显式取能力对象而不是靠类型提升：ModelProvisioning 不是
+        // TranscribeService 的子类型，`is!` 之后 Dart 不会把变量提升成交集类型。
+        final ModelProvisioning? provisioning =
+            service is ModelProvisioning ? service as ModelProvisioning : null;
+        if (provisioning == null) {
+          await _json(response, <String, Object?>{
+            'language': language.tag,
+            'managed': true,
+            'ready': true,
+          });
+          return;
+        }
+        response.headers.contentType =
+            ContentType('application', 'x-ndjson', charset: 'utf-8');
+        response.bufferOutput = false;
+        // 与转录流同一条纪律：显式 UTF-8 编码，绝不用 response.write(String)
+        // （IOSink 默认 latin1，一个非 ASCII 文件名就会在流开始后抛，表现成
+        // 「连接永远不关」）。
+        void emit(Map<String, Object?> json) {
+          response.add(utf8.encode('${jsonEncode(json)}\n'));
+        }
+
+        emit(<String, Object?>{'phase': 'download', 'processedMs': 0, 'totalMs': 0});
+        await response.flush();
+        try {
+          await for (final ModelDownloadEvent e
+              in provisioning.pullModel(language: language)) {
+            // 字段名与转录流的 download 阶段逐字一致，前端复用同一个进度渲染，
+            // 不必认第二种事件形状。
+            emit(<String, Object?>{
+              'phase': 'download',
+              'processedMs': e.receivedBytes,
+              'totalMs': e.totalBytes,
+              'detail': e.fileName,
+            });
+            await response.flush();
+          }
+          emit(<String, Object?>{'phase': 'complete'});
+        } on Object catch (error) {
+          emit(<String, Object?>{'phase': 'error', 'error': '$error'});
+        }
+        await response.flush();
+        await response.close();
+        return;
+      }
+
       if (path == '/v1/backends' && request.method == 'GET') {
         await _json(
             response, {'backends': _backends.map((b) => b.toJson()).toList()});
@@ -378,12 +509,17 @@ class AsrServer {
         if (subtitleCues != null) {
           emit({
             'phase': 'subtitle',
-            'detail': '已解析 ${subtitleCues.length} 条字幕，保留原文并校准时间轴'
+            'detail': '已解析 ${subtitleCues.length} 条字幕，保留原文并校准时间轴',
+            'detailCode': 'subtitleParsed'
           });
         }
         EpubBook? book;
         if (withBook) {
-          emit({'phase': 'book', 'detail': '按 EPUB 阅读顺序解析正文与 ruby 注音'});
+          emit({
+            'phase': 'book',
+            'detail': '按 EPUB 阅读顺序解析正文与 ruby 注音',
+            'detailCode': 'bookParsing',
+          });
           book = await readCancellableEpubBook(attachment.path, cancellation);
         }
         final bookReadMs = pipelineWatch.elapsedMilliseconds;
@@ -445,12 +581,16 @@ class AsrServer {
           'provider': outcome.providerLabel,
           'fellBack': outcome.provider?.didFallBack ?? false,
           'engine': backend?.id ?? 'default',
-          'engineName': backend?.name ?? '服务器默认',
+          'engineName': backend?.name ?? 'server default',
           'text': retimed?.text ?? aligned?.text ?? outcome.text,
           if (aligned != null || retimed != null) 'rawText': outcome.text,
         });
       } on TranscribeCancelled {
-        emit({'phase': 'cancelled', 'detail': '任务已终止，运算资源已释放'});
+        emit({
+          'phase': 'cancelled',
+          'detail': '任务已终止，运算资源已释放',
+          'detailCode': 'cancelledReleased',
+        });
       } catch (error) {
         // 已经开始流式写了，改不了状态码，所以错误也走 NDJSON 的最后一行。
         // 客户端的判据必须是「有没有收到 result 行」，不是 HTTP 状态码。

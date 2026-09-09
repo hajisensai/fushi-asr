@@ -4,6 +4,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { download } from '@/lib/api';
 import { useT } from '@/lib/i18n-react';
+import { resultEngineLabel } from '@/lib/engine-label';
 import type { SavedResult } from '@/lib/types';
 export const ResultCard = memo(function ResultCard({ saved }: { saved: SavedResult }) {
   const t = useT();
@@ -17,7 +18,7 @@ export const ResultCard = memo(function ResultCard({ saved }: { saved: SavedResu
   }
   const format = r.format.toUpperCase();
   return <section className="result panel min-w-0 scroll-mt-20" id={`result-${saved.id}`}>
-    <h3 className="font-semibold">{r.engineName}{m ? t('result.retimeSuffix') : ''}</h3>
+    <h3 className="font-semibold">{resultEngineLabel(r)}{m ? t('result.retimeSuffix') : ''}</h3>
     <p className="note mt-1 break-all">{file.name}{subtitle ? ' ＋ ' + subtitle.name : book ? ' ＋ ' + book.name : t('result.audioOnly')}</p>
     <dl className="flex flex-wrap gap-x-6 gap-y-3 my-4">
       {[
@@ -41,7 +42,7 @@ export const ResultCard = memo(function ResultCard({ saved }: { saved: SavedResu
       <p className="alignment note mb-2">{t('align.summary', { matched: a.matchedCues, total: a.inputCues, rate: (a.matchRate * 100).toFixed(1), unmatched: a.unmatchedCues, added: a.boundariesAdded, removed: a.boundariesRemoved })}</p>
       <p className="note mb-3">{t('align.note', { warnings: a.warnings.join(' ') })}</p>
     </> : null}
-    <Textarea readOnly spellCheck={false} value={r.text} aria-label={t('result.subtitleLabel', { engine: r.engineName })} className="min-h-60" />
+    <Textarea readOnly spellCheck={false} value={r.text} aria-label={t('result.subtitleLabel', { engine: resultEngineLabel(r) })} className="min-h-60" />
     <div className="flex flex-wrap gap-2 mt-3">
       <Button variant="outline" size="sm" onClick={() => download(r, file)}>{m ? t('result.downloadRetimed', { format }) : a ? t('result.downloadAligned', { format }) : t('result.download', { format })}</Button>
       {r.rawText !== undefined ? <Button variant="outline" size="sm" onClick={() => download(r, file, true)}>{t('result.downloadRaw')}</Button> : null}

@@ -72,7 +72,11 @@ class AppleTranscribeRunner implements TranscribeService {
         native = await runCompatible('Apple 兼容模式，解码音频');
       } else {
         onProgress?.call(
-            const TranscribeProgress(phase: 'load', detail: 'Apple 原生读取音频'));
+            const TranscribeProgress(
+              phase: 'load',
+              detail: 'Apple 原生读取音频',
+              detailCode: 'appleDecoding',
+            ));
         native = await _runNative(audioPaths.single, onProgress, cancellation);
         if (native.exitCode == 65 && native.unsupportedInput) {
           native = await runCompatible('原生解码不支持此文件，使用兼容解码');
@@ -132,7 +136,8 @@ class AppleTranscribeRunner implements TranscribeService {
                 phase: 'transcribe',
                 processedMs: (value['processedMs'] as num).toInt(),
                 totalMs: (value['totalMs'] as num).toInt(),
-                detail: 'Apple SpeechTranscriber · 已确认片段进度'));
+                detail: 'Apple SpeechTranscriber · 已确认片段进度',
+                detailCode: 'appleConfirmed'));
           }
         } on FormatException {
           // Ignore malformed diagnostics, not final results.

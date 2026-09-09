@@ -23,13 +23,24 @@ class TranscribeProgress {
     this.processedMs = 0,
     this.totalMs = 0,
     this.detail = '',
+    this.detailCode = '',
   });
 
   /// `download` / `load` / `transcribe` / `done`。
   final String phase;
   final int processedMs;
   final int totalMs;
+
+  /// 人读的说明。**这一层写死一种语言**（历史原因是中文），所以它只是兜底：
+  /// 有 [detailCode] 时界面按 code 查自己的语言，没有才显示这句原文。
   final String detail;
+
+  /// 稳定的说明标识（如 `cpuFallback` / `firstChunkPending`）。界面据此本地化。
+  ///
+  /// 为什么不干脆把 detail 删掉：CLI 与第三方调用方没有词典，拿到 code 也没法
+  /// 显示。两者并存，各取所需——**新增说明必须同时给 code**，否则又会多出一条
+  /// 只有一种语言的文案。
+  final String detailCode;
 
   double get fraction => totalMs <= 0 ? 0 : (processedMs / totalMs).clamp(0, 1);
 
@@ -39,6 +50,7 @@ class TranscribeProgress {
         'totalMs': totalMs,
         'fraction': fraction,
         if (detail.isNotEmpty) 'detail': detail,
+        if (detailCode.isNotEmpty) 'detailCode': detailCode,
       };
 }
 
@@ -99,8 +111,30 @@ abstract interface class TranscribeService {
   });
 }
 
+/// 「模型能不能预先准备好」这件事的可选能力。
+///
+/// **刻意不塞进 [TranscribeService]**：不是每个后端都有模型可下——Apple 的
+/// SpeechTranscriber 由系统管理，三个测试替身更没有模型目录。做成必需方法会逼着
+/// 每个实现都写一遍「我没有模型」的空壳，而空壳实现正是将来「明明没准备好却报
+/// 已就绪」的来源。调用方用 `is ModelProvisioning` 判一次即可，没有这能力的后端
+/// 自然走「无需下载」那一支。
+abstract interface class ModelProvisioning {
+  /// 这个语言现在会怎么跑：模型下全了没、缺多少字节、会落到哪个执行后端、
+  /// EP 探测有没有失败。**不启动转录、不建会话**。
+  Future<AsrTranscribePlan> planFor({required AsrLanguage language});
+
+  /// 预先把这个语言要用的东西下全（ORT 运行时 + 模型），逐文件回报字节进度。
+  ///
+  /// 已经齐全时不发任何事件直接结束——「按下下载键什么都没发生」是对的，
+  /// 那正说明不用下。
+  Stream<ModelDownloadEvent> pullModel({
+    required AsrLanguage language,
+    AsrEncoderVariant? variant,
+  });
+}
+
 /// 本机转录器。
-class TranscribeRunner implements TranscribeService {
+class TranscribeRunner implements TranscribeService, ModelProvisioning {
   TranscribeRunner({
     required this.registry,
     this.dataRoot,
@@ -200,32 +234,9 @@ class TranscribeRunner implements TranscribeService {
       ));
     }
 
-    final AsrTranscriptionService service = AsrTranscriptionService(
-      // managedRuntimeDir 是 per-isolate 静态字段，过不了边界：不把它显式
-      // 送进去，推理 isolate 会重新解析候选并撞回系统目录里的旧 ORT。
-      backend: AsrIsolateBackend(
-        buildFactory: buildFfiOnnxFactory,
-        bootstrap: adoptOrtManagedRuntimeDir,
-        bootstrapArg: OrtRuntime.managedRuntimeDir,
-      ),
-      loader: sessionFactory == null
-          ? null
-          : AsrEngineLoader(factory: sessionFactory),
-      runInIsolate: sessionFactory == null,
-      greedySessions: _macOsSetting('ASR_MACOS_GREEDY_SESSIONS'),
-      greedyIntraOpThreads: _macOsSetting('ASR_MACOS_GREEDY_THREADS'),
-      batchSize: _macOsSetting('ASR_MACOS_BATCH_SIZE'),
-      // CPU/INT8 checkpoints must not satisfy an explicit FP32/CoreML run.
-      jobsRoot: forceCoreMl
-          ? () async => Directory(
-              '${(await asrSupportRootDirectory()).path}/asr_jobs/coreml-fp32')
-          : null,
-    );
-    final AsrAccelerationPreference preference = forceCoreMl
-        ? AsrAccelerationPreference.coreml
-        : forceCpu
-            ? AsrAccelerationPreference.cpuOnly
-            : AsrAccelerationPreference.auto;
+    final AsrTranscriptionService service =
+        _newTranscriptionService(sessionFactory: sessionFactory);
+    final AsrAccelerationPreference preference = _preference;
 
     final AsrTranscribePlan plan = await service.plan(
       language: language,
@@ -242,6 +253,7 @@ class TranscribeRunner implements TranscribeService {
       onProgress?.call(TranscribeProgress(
         phase: 'load',
         detail: 'EP 探测失败，按 CPU 推荐：$probeError',
+        detailCode: 'cpuFallback',
       ));
     }
 
@@ -284,6 +296,7 @@ class TranscribeRunner implements TranscribeService {
       onProgress?.call(const TranscribeProgress(
         phase: 'transcribe',
         detail: '模型已就绪；按音频块回报进度，首块完成前剩余时间待估算',
+        detailCode: 'firstChunkPending',
       ));
       AsrTranscribeResult? finished;
       await for (final AsrTranscribeEvent event in running.run()) {
@@ -339,6 +352,76 @@ class TranscribeRunner implements TranscribeService {
       }
       asrShutdownTrace('runner: dispose done');
     }
+  }
+
+  /// 构造一次推理用的 [AsrTranscriptionService]。
+  ///
+  /// 抽出来是因为除了真转录，「这个语言的模型下好了没 / 会落到哪个执行后端」也要
+  /// 问同一个 service（见 [planFor] / [pullModel]）。两处各写一份构造参数，早晚
+  /// 会漂成「查询时说会用 GPU、真跑时却按另一套参数落到 CPU」——那种不一致比没有
+  /// 这个查询更糟。
+  /// [sessionFactory] 只有 [_run] 会传（测试注入的会话工厂）；查询路径
+  /// （[planFor] / [pullModel]）不需要会话，走默认的 isolate 后端。
+  AsrTranscriptionService _newTranscriptionService({
+    OnnxSessionFactory? sessionFactory,
+  }) =>
+      AsrTranscriptionService(
+        // managedRuntimeDir 是 per-isolate 静态字段，过不了边界：不把它显式
+        // 送进去，推理 isolate 会重新解析候选并撞回系统目录里的旧 ORT。
+        backend: AsrIsolateBackend(
+          buildFactory: buildFfiOnnxFactory,
+          bootstrap: adoptOrtManagedRuntimeDir,
+          bootstrapArg: OrtRuntime.managedRuntimeDir,
+        ),
+        loader: sessionFactory == null
+            ? null
+            : AsrEngineLoader(factory: sessionFactory),
+        runInIsolate: sessionFactory == null,
+        greedySessions: _macOsSetting('ASR_MACOS_GREEDY_SESSIONS'),
+        greedyIntraOpThreads: _macOsSetting('ASR_MACOS_GREEDY_THREADS'),
+        batchSize: _macOsSetting('ASR_MACOS_BATCH_SIZE'),
+        // CPU/INT8 checkpoints must not satisfy an explicit FP32/CoreML run.
+        jobsRoot: forceCoreMl
+            ? () async => Directory(
+                '${(await asrSupportRootDirectory()).path}/asr_jobs/coreml-fp32')
+            : null,
+      );
+
+  /// 本机加速偏好。与真转录用的是同一个值（见 [_newTranscriptionService]）。
+  AsrAccelerationPreference get _preference => forceCoreMl
+      ? AsrAccelerationPreference.coreml
+      : forceCpu
+          ? AsrAccelerationPreference.cpuOnly
+          : AsrAccelerationPreference.auto;
+
+  @override
+  Future<AsrTranscribePlan> planFor({required AsrLanguage language}) async {
+    // 不落 ORT 运行时、不建会话：plan 只读模型目录与 EP 探测结果，供「还没开始
+    // 转录时就告诉用户会发生什么」用。
+    return _newTranscriptionService().plan(
+      language: language,
+      preference: _preference,
+    );
+  }
+
+  @override
+  Stream<ModelDownloadEvent> pullModel({
+    required AsrLanguage language,
+    AsrEncoderVariant? variant,
+  }) async* {
+    // 先确保 ORT 运行时在位：模型本体下完了但运行时没有，等于「显示已就绪、
+    // 一开跑又卡在下载」——预下载要能真正把首次转录的等待清零。
+    yield* ensureOrtRuntime();
+    final AsrTranscriptionService service = _newTranscriptionService();
+    final AsrTranscribePlan plan = await service.plan(
+      language: language,
+      preference: _preference,
+    );
+    if (plan.modelReady && variant == null) return;
+    yield* service.downloadModel(
+      language: language,
+      variant: variant ?? plan.variant,
+    );
   }
 }
 
