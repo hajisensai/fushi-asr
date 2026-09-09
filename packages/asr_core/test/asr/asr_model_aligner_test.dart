@@ -70,7 +70,7 @@ void main() {
       ]);
       final AsrDecodedSegment result = (await _aligner(
         session,
-      ).align(_speech(session), transcript))!;
+      ).align(_speech(session), transcript)).segment!;
       expect(session.calls, 1);
       expect(result.tokens, transcript.tokens);
       expect(result.text, '「A、 b！」');
@@ -86,37 +86,74 @@ void main() {
       final _Session session = _Session(<int>[0, 1, 1, 0, 2, 2, 0]);
       final AsrDecodedSegment result = (await _aligner(
         session,
-      ).align(_speech(session), _text(<String>['ab'])))!;
+      ).align(_speech(session), _text(<String>['ab']))).segment!;
       expect(result.tokens, <String>['ab']);
       expect(result.tokenOffsetsMs, <int>[20]);
       expect(result.tokenEndOffsetsMs, <int>[120]);
     },
   );
 
-  test(
-    'a vocabulary gap skips that character instead of killing the segment',
-    () async {
-      // 调轴词表与一遍模型的词表是两张表；缺字是常态，不是致命错误。缺掉的字
-      // 与标点同路，时间由相邻锚点继承，整段照常对齐。
-      final _Session session = _Session(<int>[0, 1, 1, 0]);
-      final AsrDecodedSegment result = (await _aligner(
-        session,
-      ).align(_speech(session), _text(<String>['ax'])))!;
-      expect(result.tokens, <String>['ax']);
-      expect(result.tokenOffsetsMs, <int>[20]);
-      expect(result.tokenEndOffsetsMs, <int>[60]);
-      expect(session.calls, 1);
-    },
-  );
+  test('token 尾部缺字：终点推定到后一个锚点，不许拿已知字的终点切掉字音', () async {
+    // 缺字**发声**，不像标点。'x' 查不到 token，但它的音在 'a' 之后仍要被这条
+    // cue 盖住：终点取后一个声学锚点，没有后锚点就取整段长度（80 ms）。
+    // 若退回「与标点同路」，终点会是 'a' 的 60 ms，字幕提前消失。
+    final _Session session = _Session(<int>[0, 1, 1, 0]);
+    final AsrSegmentAlignment aligned = await _aligner(
+      session,
+    ).align(_speech(session), _text(<String>['ax']));
+    expect(aligned.isRejected, isFalse);
+    expect(aligned.segment!.tokens, <String>['ax']);
+    expect(aligned.segment!.tokenOffsetsMs, <int>[20]);
+    expect(aligned.segment!.tokenEndOffsetsMs, <int>[80]);
+    // 终点是推定的，不是声学定位：不能冒充完整对齐成功。
+    expect(aligned.estimatedBoundaries, 1);
+    expect(session.calls, 1);
+  });
+
+  test('token 首部缺字：起点推定到前一个锚点，不许晚出', () async {
+    final _Session session = _Session(<int>[0, 1, 1, 0]);
+    final AsrSegmentAlignment aligned = await _aligner(
+      session,
+    ).align(_speech(session), _text(<String>['xa']));
+    // 'x' 在 'a' 之前发声，段内没有更早的锚点 -> 取段起点 0，而不是 'a' 的 20。
+    expect(aligned.segment!.tokenOffsetsMs, <int>[0]);
+    expect(aligned.segment!.tokenEndOffsetsMs, <int>[60]);
+    expect(aligned.estimatedBoundaries, 1);
+  });
+
+  test('token 内部缺字本来就被两端锚点夹住，不算推定', () async {
+    final _Session session = _Session(<int>[0, 1, 1, 0, 2, 2, 0]);
+    final AsrSegmentAlignment aligned = await _aligner(
+      session,
+    ).align(_speech(session), _text(<String>['axb']));
+    expect(aligned.segment!.tokenOffsetsMs, <int>[20]);
+    expect(aligned.segment!.tokenEndOffsetsMs, <int>[120]);
+    expect(aligned.estimatedBoundaries, 0);
+  });
+
+  test('整个 token 都缺字：两端都推定成相邻锚点，不是零时长继承', () async {
+    final _Session session = _Session(<int>[0, 1, 1, 0]);
+    final AsrSegmentAlignment aligned = await _aligner(
+      session,
+    ).align(_speech(session), _text(<String>['x', 'a']));
+    // 'x' 整个查不到：起点没有前锚点取 0，终点取后一个声学锚点 20。
+    // 退化成标点式零时长继承的话这里会是 [0, 0]。
+    expect(aligned.segment!.tokenOffsetsMs, <int>[0, 20]);
+    expect(aligned.segment!.tokenEndOffsetsMs, <int>[20, 60]);
+    expect(aligned.estimatedBoundaries, 2);
+  });
 
   test(
     'a mostly out-of-vocabulary body is unmeasurable, not a failure',
     () async {
       // 能进声学路径的字不到一半：剩下的锚点撑不住整段时间分配，判无从度量。
       final _Session session = _Session(<int>[0, 1, 0]);
+      final AsrSegmentAlignment aligned = await _aligner(
+        session,
+      ).align(_speech(session), _text(<String>['axx']));
       expect(
-        await _aligner(session).align(_speech(session), _text(<String>['axx'])),
-        isNull,
+        aligned.rejection,
+        AsrAlignmentRejection.tooFewMappableCharacters,
       );
       expect(session.calls, 0);
     },
@@ -124,10 +161,10 @@ void main() {
 
   test('punctuation-only body carries no acoustic evidence', () async {
     final _Session session = _Session(<int>[0, 1, 0]);
-    expect(
-      await _aligner(session).align(_speech(session), _text(<String>['… '])),
-      isNull,
-    );
+    final AsrSegmentAlignment aligned = await _aligner(
+      session,
+    ).align(_speech(session), _text(<String>['… ']));
+    expect(aligned.rejection, AsrAlignmentRejection.tooFewMappableCharacters);
     expect(session.calls, 0);
   });
 
@@ -148,7 +185,7 @@ void main() {
       final _Session session = _Session(<int>[0, 0]);
       final AsrDecodedSegment result = (await _aligner(
         session,
-      ).align(_speech(session), AsrDecodedSegment.empty))!;
+      ).align(_speech(session), AsrDecodedSegment.empty)).segment!;
       expect(result.isEmpty, isTrue);
       expect(session.calls, 0);
     },
@@ -156,10 +193,10 @@ void main() {
 
   test('impossible repeated-character CTC path is unalignable', () async {
     final _Session session = _Session(<int>[1, 1]);
-    expect(
-      await _aligner(session).align(_speech(session), _text(<String>['aa'])),
-      isNull,
-    );
+    final AsrSegmentAlignment aligned = await _aligner(
+      session,
+    ).align(_speech(session), _text(<String>['aa']));
+    expect(aligned.rejection, AsrAlignmentRejection.noViterbiPath);
     expect(session.calls, 1);
   });
 
@@ -168,10 +205,10 @@ void main() {
     () async {
       for (final bool uniform in <bool>[false, true]) {
         final _Session session = _Session(<int>[0, 0, 0, 0], uniform: uniform);
-        expect(
-          await _aligner(session).align(_speech(session), _text(<String>['a'])),
-          isNull,
-        );
+        final AsrSegmentAlignment aligned = await _aligner(
+          session,
+        ).align(_speech(session), _text(<String>['a']));
+        expect(aligned.rejection, AsrAlignmentRejection.noAcousticEvidence);
       }
     },
   );
