@@ -114,6 +114,42 @@ void main() {
     if (tmp.existsSync()) await tmp.delete(recursive: true);
   });
 
+  test('alignment completes before SRT and checkpoint; failed batches resume',
+      () async {
+    int alignmentCalls = 0;
+    bool failAlignment = true;
+    AsrTranscribeJob makeJob() => AsrTranscribeJob(
+          jobDir: tmp,
+          audioPaths: <String>['a.mp3'],
+          modelId: _kModelId,
+          pcm: _FakePcm(<String, int>{'a.mp3': 1000}),
+          segmenter: _FakeSegmenter(segmentsPerChunk: 1),
+          decoder: _FakeDecoder(),
+          alignSegment:
+              (AsrSpeechSegment speech, AsrDecodedSegment transcript) async {
+            alignmentCalls++;
+            expect(speech.samples.length, kAsrSampleRate);
+            expect(transcript.text, 'あ。');
+            if (failAlignment) throw StateError('alignment failed');
+            return AsrDecodedSegment(
+              tokens: transcript.tokens,
+              tokenOffsetsMs: <int>[200, 600],
+              tokenEndOffsetsMs: <int>[600, 600],
+            );
+          },
+        );
+    await expectLater(makeJob().run().toList(), throwsStateError);
+    expect(File('${tmp.path}/${AsrJobFiles.srt}').existsSync(), isFalse);
+    failAlignment = false;
+    final List<AsrTranscribeEvent> events = await makeJob().run().toList();
+    expect(events.last, isA<AsrTranscribeFinishedEvent>());
+    expect(alignmentCalls, 2);
+    final String srt =
+        await File('${tmp.path}/${AsrJobFiles.srt}').readAsString();
+    expect(srt, contains('00:00:00,200 --> 00:00:00,600'));
+    expect(srt, contains('あ。'));
+  });
+
   test('两文件全程跑完：进度单调、检查点落盘、SRT 生成、时间按文件偏移', () async {
     final _FakePcm pcm = _FakePcm(<String, int>{
       'a.mp3': 20000,

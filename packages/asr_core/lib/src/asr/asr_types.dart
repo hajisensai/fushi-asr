@@ -19,6 +19,7 @@ import 'dart:convert' show utf8;
 
 import 'dart:typed_data';
 import 'package:meta/meta.dart';
+
 /// 全链路统一采样率（fbank / VAD / 模型都按 16 kHz 训练）。
 const int kAsrSampleRate = 16000;
 
@@ -250,7 +251,10 @@ class AsrDecodedSegment {
   const AsrDecodedSegment({
     required this.tokens,
     required this.tokenOffsetsMs,
-  }) : assert(tokens.length == tokenOffsetsMs.length);
+    this.tokenEndOffsetsMs,
+  })  : assert(tokens.length == tokenOffsetsMs.length),
+        assert(tokenEndOffsetsMs == null ||
+            tokens.length == tokenEndOffsetsMs.length);
 
   // 注：const 构造里的 assert 不能对 const 列表取 length，故这里只能是 final。
   static final AsrDecodedSegment empty = AsrDecodedSegment(
@@ -276,6 +280,10 @@ class AsrDecodedSegment {
   final List<String> tokens;
   final List<int> tokenOffsetsMs;
 
+  /// 二次模型对齐后的 token 结束时间；null 表示旧的发射时间结果。
+  /// 标点等无声 token 可以是零时长。
+  final List<int>? tokenEndOffsetsMs;
+
   String get text => tokens.join();
   bool get isEmpty => tokens.isEmpty;
 }
@@ -289,7 +297,10 @@ class AsrTranscribedSegment {
     required this.endMs,
     required this.tokens,
     required this.tokenTimesMs,
-  }) : assert(tokens.length == tokenTimesMs.length);
+    this.tokenEndTimesMs,
+  })  : assert(tokens.length == tokenTimesMs.length),
+        assert(
+            tokenEndTimesMs == null || tokens.length == tokenEndTimesMs.length);
 
   factory AsrTranscribedSegment.fromDecoded({
     required int audioFileIndex,
@@ -304,6 +315,11 @@ class AsrTranscribedSegment {
       tokenTimesMs: List<int>.unmodifiable(
         decoded.tokenOffsetsMs.map((int o) => speech.startMs + o),
       ),
+      tokenEndTimesMs: decoded.tokenEndOffsetsMs == null
+          ? null
+          : List<int>.unmodifiable(
+              decoded.tokenEndOffsetsMs!.map((int o) => speech.startMs + o),
+            ),
     );
   }
 
@@ -318,6 +334,12 @@ class AsrTranscribedSegment {
       tokenTimesMs: List<int>.unmodifiable(
         (json['m'] as List<Object?>).map((Object? v) => (v as num).toInt()),
       ),
+      tokenEndTimesMs: json['me'] == null
+          ? null
+          : List<int>.unmodifiable(
+              (json['me'] as List<Object?>)
+                  .map((Object? v) => (v as num).toInt()),
+            ),
     );
   }
 
@@ -332,6 +354,10 @@ class AsrTranscribedSegment {
   /// 每个 token 的发射时间（毫秒，相对该音频文件）。
   final List<int> tokenTimesMs;
 
+  /// 二次模型对齐的结束时间（相对音频文件），与 [tokenTimesMs] 等长。
+  /// null 保持旧任务的 RNN-T/VAD 定轴行为。
+  final List<int>? tokenEndTimesMs;
+
   String get text => tokens.join();
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -340,6 +366,7 @@ class AsrTranscribedSegment {
         'e': endMs,
         't': tokens,
         'm': tokenTimesMs,
+        if (tokenEndTimesMs != null) 'me': tokenEndTimesMs,
       };
 }
 

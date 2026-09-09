@@ -68,6 +68,36 @@ void main() {
       );
 
   group('plan：EP 探测失败不吞（A5）', () {
+    test('second pass includes aligner download and isolates old cached jobs',
+        () async {
+      final AsrTranscriptionService aligned = AsrTranscriptionService(
+        backend: const AsrIsolateBackend(buildFactory: _unusedFactory),
+        loader: AsrEngineLoader(factory: _ProbeFactory()),
+        openStore: (AsrLanguage l) async =>
+            AsrModelStore(tmp, asrModelPackFor(l)),
+        openAlignmentStore: () async => AsrModelStore(
+            Directory(p.join(tmp.path, 'aligner')), kAsrOmnilingualPack),
+        jobsRoot: () async => tmp,
+        alignGeneratedSubtitles: true,
+      );
+      final AsrTranscribePlan plan = await aligned.plan(
+        language: AsrLanguage.japanese,
+        preference: AsrAccelerationPreference.cpuOnly,
+      );
+      expect(plan.alignmentModelStatus, isNotNull);
+      expect(plan.modelReady, isFalse);
+      expect(
+          plan.totalModelBytes,
+          plan.modelStatus.totalBytes +
+              kAsrOmnilingualPack.totalBytes(AsrEncoderVariant.int8));
+      expect(plan.bytesToDownload, plan.totalModelBytes);
+      final Directory originalDir = await service(_ProbeFactory())
+          .jobDirFor(<String>['a.mp3'], AsrLanguage.japanese);
+      final Directory alignedDir =
+          await aligned.jobDirFor(<String>['a.mp3'], AsrLanguage.japanese);
+      expect(alignedDir.path, isNot(originalDir.path));
+      expect(alignedDir.path, endsWith('-ctc-aligned-v1'));
+    });
     test('探测抛错 → 按 CPU 推荐 int8，且 probeError 带原因', () async {
       final _ProbeFactory factory = _ProbeFactory(
         error: StateError('DirectML.dll not found'),

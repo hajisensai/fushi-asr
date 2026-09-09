@@ -298,6 +298,7 @@ class AsrTranscribeJob {
     required this.pcm,
     required this.segmenter,
     required this.decoder,
+    this.alignSegment,
     this.batchSize = 8,
     this.chunkSeconds = 300,
     this.cueBuilder = const AsrCueBuilder(),
@@ -316,6 +317,13 @@ class AsrTranscribeJob {
   final AsrPcmSource pcm;
   final AsrSegmenter segmenter;
   final AsrBatchDecoder decoder;
+
+  /// Run a separate acoustic alignment before persisting a decoded segment.
+  /// A failed alignment aborts this batch; unaligned output is never committed.
+  final Future<AsrDecodedSegment> Function(
+    AsrSpeechSegment speech,
+    AsrDecodedSegment transcript,
+  )? alignSegment;
 
   /// **动态 shape 路径**的成批参考段数：一批的音频预算 = [batchSize] ×
   /// [kAsrBatchReferenceSeconds] 秒。段短时一批可以装比它多得多的段（上限
@@ -567,11 +575,14 @@ class AsrTranscribeJob {
         final List<AsrTranscribedSegment> out = <AsrTranscribedSegment>[];
         for (int k = 0; k < batch.length; k++) {
           if (decoded[k].isEmpty) continue;
+          final AsrDecodedSegment aligned = alignSegment == null
+              ? decoded[k]
+              : await alignSegment!(batch[k], decoded[k]);
           out.add(
             AsrTranscribedSegment.fromDecoded(
               audioFileIndex: fileIndex,
               speech: batch[k],
-              decoded: decoded[k],
+              decoded: aligned,
             ),
           );
           speechMs += batch[k].lengthMs;

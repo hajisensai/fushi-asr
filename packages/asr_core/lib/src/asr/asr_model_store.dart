@@ -16,14 +16,13 @@ import 'package:fushi_asr_core/src/util/asr_paths.dart';
 import 'package:fushi_asr_core/src/util/directory_bytes.dart';
 
 /// 贪心 Loop 图的拼装器签名（见 `asr_greedy_graph.dart` 的 `buildAsrGreedyGraph`）。
-typedef AsrGreedyGraphBuilder =
-    Uint8List Function({
-      required Uint8List decoderOnnx,
-      required Uint8List joinerOnnx,
-      required int blankId,
-      required int unkId,
-      int contextSize,
-    });
+typedef AsrGreedyGraphBuilder = Uint8List Function({
+  required Uint8List decoderOnnx,
+  required Uint8List joinerOnnx,
+  required int blankId,
+  required int unkId,
+  int contextSize,
+});
 
 /// 派生图的格式版本：拼装逻辑（IO 名、语义）变了就 +1，旧缓存自动重建。
 const int kAsrGreedyGraphFormatVersion = 1;
@@ -69,8 +68,12 @@ class AsrModelStore {
   /// 与漫画 OCR 的 `<appSupport>/ocr_models/manga` 同级同构，经 [asrSupportRootDirectory] 数据根
   /// 单一入口，不硬编码平台路径。一语言一目录：删包即清空，互不牵连。
   static Future<AsrModelStore> open(AsrLanguage language) async {
+    return openPack(asrModelPackFor(language));
+  }
+
+  /// Open a shared model by identity, including the second-pass aligner.
+  static Future<AsrModelStore> openPack(AsrModelPack pack) async {
     final Directory support = await asrSupportRootDirectory();
-    final AsrModelPack pack = asrModelPackFor(language);
     return AsrModelStore(
       Directory(p.join(support.path, 'asr_models', pack.id)),
       pack,
@@ -127,8 +130,7 @@ class AsrModelStore {
     AsrEncoderVariant variant, {
     ModelFileDownloader? downloader,
   }) {
-    final ModelFileDownloader effective =
-        downloader ??
+    final ModelFileDownloader effective = downloader ??
         ModelFileDownloader(
           urlCandidates: (DownloadableModelFile file) =>
               // 只有本清单的 [AsrModelFile] 会经本方法进入下载器，转型结构上成立。
