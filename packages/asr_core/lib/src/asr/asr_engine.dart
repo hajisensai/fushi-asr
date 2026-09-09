@@ -422,18 +422,21 @@ class AsrEngineLoader {
         openedEncoder.resolution,
         probeError,
       );
-      final OnnxSession decoder = await _factory.createSession(
-        store.fileFor(asrDecoderRole(variant)).path,
+      final OnnxSession decoder = await _openManifestSession(
+        store,
+        asrDecoderRole(variant),
         providers: cpu,
       );
       opened.add(decoder);
-      final OnnxSession joiner = await _factory.createSession(
-        store.fileFor(asrJoinerRole(variant)).path,
+      final OnnxSession joiner = await _openManifestSession(
+        store,
+        asrJoinerRole(variant),
         providers: cpu,
       );
       opened.add(joiner);
-      final OnnxSession vad = await _factory.createSession(
-        store.fileFor(AsrModelRole.vad).path,
+      final OnnxSession vad = await _openManifestSession(
+        store,
+        AsrModelRole.vad,
         providers: cpu,
       );
       opened.add(vad);
@@ -591,8 +594,9 @@ class AsrEngineLoader {
         openedEncoder.resolution,
         probeError,
       );
-      final OnnxSession vad = await _factory.createSession(
-        store.fileFor(AsrModelRole.vad).path,
+      final OnnxSession vad = await _openManifestSession(
+        store,
+        AsrModelRole.vad,
         providers: cpu,
       );
       opened.add(vad);
@@ -651,6 +655,80 @@ class AsrEngineLoader {
     }
   }
 
+  /// 建一个**清单文件**的会话，并在失败时分辨「是不是这个文件本身坏了」。
+  ///
+  /// 坏档不再把 ORT 的 `Protobuf parsing failed` 原样抛给上层：那句话对用户没有
+  /// 任何可执行含义，而 [isAsrModelFileReady] 的宽松判定（存在且非空）会让下载
+  /// 器每次都把它当就绪跳过——同一个错误于是每次转录复现，用户除了手删整个模型
+  /// 目录没有出路。这里把坏档删掉并换成 [AsrModelFileUnusableException]，
+  /// 「重新下载」这条本来就有的路重新可达。
+  ///
+  /// 只处理清单文件。派生文件（fp16 编码器、贪心 Loop 图）不走这里：它们各自
+  /// 已有「失败就回退」的路径，删不删都不影响用户能不能转录。
+  Future<OnnxSession> _openManifestSession(
+    AsrModelStore store,
+    AsrModelRole role, {
+    required List<OnnxExecutionProvider> providers,
+    void Function(OnnxProviderResolution resolution)? onProviderResolved,
+  }) async {
+    final File file = store.fileFor(role);
+    try {
+      return await _factory.createSession(
+        file.path,
+        providers: providers,
+        onProviderResolved: onProviderResolved,
+      );
+    } catch (error) {
+      if (!isOnnxUnreadableModelFailure(error)) {
+        rethrow;
+      }
+      throw _discardUnusableModelFile(store, role, file, error);
+    }
+  }
+
+  /// 删掉装不起来的模型文件，并造出带诊断信息的异常。
+  ///
+  /// 删除失败不掩盖：`deleted: false` 会一路带到 UI，用户至少知道要手删哪个
+  /// 文件，而不是对着一句 protobuf 报错猜。
+  static AsrModelFileUnusableException _discardUnusableModelFile(
+    AsrModelStore store,
+    AsrModelRole role,
+    File file,
+    Object cause,
+  ) {
+    final bool existed = file.existsSync();
+    final int actual = existed ? file.lengthSync() : -1;
+    bool deleted = false;
+    if (existed) {
+      try {
+        file.deleteSync();
+        deleted = true;
+      } catch (error, stack) {
+        developer.log(
+          'ASR unusable model file could not be deleted: ${file.path}',
+          name: kAsrLogName,
+          error: error,
+          stackTrace: stack,
+        );
+      }
+    }
+    final AsrModelFile model = store.pack.fileForRole(role);
+    developer.log(
+      'ASR model file unusable (${model.fileName}, $actual bytes, '
+      'expected ${model.expectedBytes}, deleted: $deleted): ${file.path}',
+      name: kAsrLogName,
+      error: cause,
+    );
+    return AsrModelFileUnusableException(
+      fileName: model.fileName,
+      path: file.path,
+      actualBytes: actual,
+      expectedBytes: model.expectedBytes,
+      deleted: deleted,
+      cause: cause,
+    );
+  }
+
   /// 打开编码器（动态 shape 会话）。首选 EP 在 [kAsrFp16Providers] 里且 [useFp16]
   /// 时，先把 fp32 文件在设备上转成 fp16 派生文件再建会话；以下任一情况回退
   /// fp32 并留日志，不静默：
@@ -674,8 +752,9 @@ class AsrEngineLoader {
       if (fp16 != null) return fp16;
     }
     OnnxProviderResolution? resolution;
-    final OnnxSession session = await _factory.createSession(
-      fp32Path,
+    final OnnxSession session = await _openManifestSession(
+      store,
+      role,
       providers: providers,
       onProviderResolved: (OnnxProviderResolution r) => resolution = r,
     );

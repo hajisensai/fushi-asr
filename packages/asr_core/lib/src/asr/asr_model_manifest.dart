@@ -1099,3 +1099,88 @@ bool isAsrModelFileReady(File file) {
   }
   return file.lengthSync() > 0;
 }
+
+/// ORT 在**模型文件本身读不出图**时给出的错误标记。
+///
+/// 逐条都是 onnxruntime 1.22 本机实测的原文（同一份 C++ 核心，FFI 与插件两个
+/// 宿主拿到的字符串一致）：
+///
+/// | 文件状态 | ORT 报错 |
+/// |---|---|
+/// | 不存在 | `NO_SUCHFILE ... File doesn't exist` |
+/// | 0 字节 | `ModelProto does not have a graph` |
+/// | 被截断 / 内容不是 onnx | `INVALID_PROTOBUF ... Protobuf parsing failed` |
+///
+/// 靠错误串分类确实脆，但这里没有更硬的信号：ORT 只从 `createSession` 抛一个
+/// 带文本的异常，插件宿主再包一层 `PlatformException`，错误码统一是
+/// `ORT_ERROR`。误判的代价是**有界**的——被判坏的文件会被删掉重下，模型是可
+/// 再生资源，不是用户数据；漏判则只是退回原来的行为（原样抛给用户）。
+const List<String> kOnnxUnreadableModelMarkers = <String>[
+  'INVALID_PROTOBUF',
+  'Protobuf parsing failed',
+  'ModelProto does not have a graph',
+  'NO_SUCHFILE',
+  "File doesn't exist",
+];
+
+/// 建会话失败是不是**这个模型文件本身**的问题（而不是 EP / 显存 / 运行时）。
+///
+/// **只认 [kOnnxUnreadableModelMarkers]，不拿长度当独立判据**：清单
+/// [AsrModelFile.expectedBytes] 会因上游重新导出而过期，那种「长度不符但确实
+/// 跑得起来」的旧档必须继续能用（与 [isAsrModelFileReady] 刻意宽松同一个理
+/// 由）。长度只作为 [AsrModelFileUnusableException] 上的诊断字段，不参与判定。
+bool isOnnxUnreadableModelFailure(Object error) {
+  final String text = error.toString();
+  return kOnnxUnreadableModelMarkers.any(text.contains);
+}
+
+/// 模型文件已落到最终名下，却**装不起来**：被截断、内容不是 onnx，或已被外部
+/// 删除。
+///
+/// 与「未就绪」是两回事，这个区别正是本异常存在的理由：[isAsrModelFileReady]
+/// 判的是「存在且非空」，一个被写坏的档永远满足它——设置页显示已下载、
+/// `ModelFileDownloader.downloadAll` 把它当就绪跳过、转录每次都在同一处炸，
+/// 用户除了手删整个模型目录没有任何出路。所以抛出前会把那个文件**删掉**
+/// （[deleted]），把「重新下载」这条本来就存在的路重新打开。
+class AsrModelFileUnusableException implements Exception {
+  const AsrModelFileUnusableException({
+    required this.fileName,
+    required this.path,
+    required this.actualBytes,
+    required this.expectedBytes,
+    required this.deleted,
+    required this.cause,
+  });
+
+  /// 清单里的文件名（`encoder-epoch-99-avg-1.onnx`）。
+  final String fileName;
+
+  /// 出事时的绝对路径（用户报障时唯一能对上号的东西）。
+  final String path;
+
+  /// 抛出时磁盘上的实际字节数；文件已不存在为 `-1`。
+  final int actualBytes;
+
+  /// 清单里的预期字节数；清单未给为 `0`。
+  final int expectedBytes;
+
+  /// 那个文件是否已被删掉（被占用等原因删不掉时为 false，需用户手动删）。
+  final bool deleted;
+
+  /// ORT 抛出的原始错误，原样带上——上面那张标记表只覆盖已知形态，遇到新形态
+  /// 时原文是唯一线索。
+  final Object cause;
+
+  @override
+  String toString() {
+    final StringBuffer buffer = StringBuffer(
+      'AsrModelFileUnusableException($fileName at $path',
+    );
+    buffer.write(', actualBytes: $actualBytes');
+    if (expectedBytes > 0) {
+      buffer.write(', expectedBytes: $expectedBytes');
+    }
+    buffer.write(', deleted: $deleted, cause: $cause)');
+    return buffer.toString();
+  }
+}
