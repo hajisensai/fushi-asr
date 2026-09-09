@@ -150,6 +150,40 @@ void main() {
     expect(srt, contains('あ。'));
   });
 
+  test('对不齐的段只丢它自己：同批其余段照常落盘、任务照常完成', () async {
+    // 回归：以前 align 只能抛，一段对不齐会把同一批里已经解码好的段一起丢掉，
+    // 并且整个 job 死在半路，一条字幕都产不出来。
+    int aligned = 0;
+    final AsrTranscribeJob job = AsrTranscribeJob(
+      jobDir: tmp,
+      audioPaths: <String>['a.mp3'],
+      modelId: _kModelId,
+      pcm: _FakePcm(<String, int>{'a.mp3': 1000}),
+      segmenter: _FakeSegmenter(segmentsPerChunk: 3),
+      decoder: _FakeDecoder(),
+      alignSegment:
+          (AsrSpeechSegment speech, AsrDecodedSegment transcript) async {
+        // 第二段模拟「VAD 切出纯 BGM、一遍解码对着它幻听」：无声学证据。
+        if (aligned++ == 1) return null;
+        return AsrDecodedSegment(
+          tokens: transcript.tokens,
+          tokenOffsetsMs: <int>[200, 600],
+          tokenEndOffsetsMs: <int>[600, 600],
+        );
+      },
+    );
+    final List<AsrTranscribeEvent> events = await job.run().toList();
+    expect(events.last, isA<AsrTranscribeFinishedEvent>());
+    expect(aligned, 3);
+    final String srt =
+        await File('${tmp.path}/${AsrJobFiles.srt}').readAsString();
+    expect('あ。'.allMatches(srt).length, 2);
+    final AsrTranscribeProgress last =
+        events.whereType<AsrTranscribeProgressEvent>().last.progress;
+    expect(last.segmentsDone, 2);
+    expect(last.unalignedSegments, 1);
+  });
+
   test('两文件全程跑完：进度单调、检查点落盘、SRT 生成、时间按文件偏移', () async {
     final _FakePcm pcm = _FakePcm(<String, int>{
       'a.mp3': 20000,

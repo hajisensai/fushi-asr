@@ -106,6 +106,7 @@ class AsrTranscribeProgress {
     required this.segmentsDone,
     required this.elapsed,
     this.decodeStats,
+    this.unalignedSegments = 0,
   });
 
   /// 当前正在处理的文件下标（0 起）。
@@ -125,6 +126,12 @@ class AsrTranscribeProgress {
   /// 已解码的语音时长（毫秒，VAD 段之和）。
   final int speechMs;
   final int segmentsDone;
+
+  /// 声学调轴判定「对不齐」而被丢弃的段数（累计）。调轴未开启时恒为 0。
+  ///
+  /// 不为 0 不代表出错：多数是 VAD 把背景音乐当语音切出来、一遍解码对着它幻听
+  /// 的段。但它必须让用户看得见——静默丢字幕比丢得响更难查。
+  final int unalignedSegments;
 
   /// 本次 run 起算的墙钟时间（不含此前暂停的会话）。
   final Duration elapsed;
@@ -319,8 +326,15 @@ class AsrTranscribeJob {
   final AsrBatchDecoder decoder;
 
   /// Run a separate acoustic alignment before persisting a decoded segment.
-  /// A failed alignment aborts this batch; unaligned output is never committed.
-  final Future<AsrDecodedSegment> Function(
+  ///
+  /// 返回 null = 这一段对不齐（声学证据不足 / 可对齐正文太少）。**丢掉这一段，
+  /// 不要落盘，也不要炸掉整份转录**：VAD 会把纯 BGM 段当语音切出来，一遍解码
+  /// 对着音乐幻听出一两拍感叹词是常态，而调轴的 evidence 正是整条流水线上唯一
+  /// 能识破它的信号（一遍的贪心解码不产出置信度）。让这种常态抛异常，等于每
+  /// 撞上一段背景音乐就把整部片的转录结果全丢掉。
+  ///
+  /// 未对齐的输出仍然绝不落盘——丢弃，而不是退回一遍的时间戳。
+  final Future<AsrDecodedSegment?> Function(
     AsrSpeechSegment speech,
     AsrDecodedSegment transcript,
   )? alignSegment;
@@ -480,6 +494,7 @@ class AsrTranscribeJob {
     }
     await _rewriteSegments(kept);
     int segmentsDone = kept.length;
+    int unalignedSegments = 0;
     int speechMs = kept.fold<int>(
       0,
       (int acc, AsrTranscribedSegment s) => acc + (s.endMs - s.startMs),
@@ -496,6 +511,7 @@ class AsrTranscribeJob {
         totalMs: totalMs,
         speechMs: speechMs,
         segmentsDone: segmentsDone,
+        unalignedSegments: unalignedSegments,
         elapsed: clock.elapsed,
         decodeStats: statsProvider?.call(),
       );
@@ -575,9 +591,13 @@ class AsrTranscribeJob {
         final List<AsrTranscribedSegment> out = <AsrTranscribedSegment>[];
         for (int k = 0; k < batch.length; k++) {
           if (decoded[k].isEmpty) continue;
-          final AsrDecodedSegment aligned = alignSegment == null
+          final AsrDecodedSegment? aligned = alignSegment == null
               ? decoded[k]
               : await alignSegment!(batch[k], decoded[k]);
+          if (aligned == null) {
+            unalignedSegments++;
+            continue;
+          }
           out.add(
             AsrTranscribedSegment.fromDecoded(
               audioFileIndex: fileIndex,

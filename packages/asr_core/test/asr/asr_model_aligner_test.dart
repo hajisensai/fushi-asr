@@ -68,9 +68,9 @@ void main() {
         'b',
         '！」',
       ]);
-      final AsrDecodedSegment result = await _aligner(
+      final AsrDecodedSegment result = (await _aligner(
         session,
-      ).align(_speech(session), transcript);
+      ).align(_speech(session), transcript))!;
       expect(session.calls, 1);
       expect(result.tokens, transcript.tokens);
       expect(result.text, '「A、 b！」');
@@ -84,9 +84,9 @@ void main() {
     'BPE transcript token retains its full text and spans all aligned characters',
     () async {
       final _Session session = _Session(<int>[0, 1, 1, 0, 2, 2, 0]);
-      final AsrDecodedSegment result = await _aligner(
+      final AsrDecodedSegment result = (await _aligner(
         session,
-      ).align(_speech(session), _text(<String>['ab']));
+      ).align(_speech(session), _text(<String>['ab'])))!;
       expect(result.tokens, <String>['ab']);
       expect(result.tokenOffsetsMs, <int>[20]);
       expect(result.tokenEndOffsetsMs, <int>[120]);
@@ -94,23 +94,45 @@ void main() {
   );
 
   test(
-    'unsupported lexical character fails rather than silently retaining old times',
+    'a vocabulary gap skips that character instead of killing the segment',
     () async {
+      // 调轴词表与一遍模型的词表是两张表；缺字是常态，不是致命错误。缺掉的字
+      // 与标点同路，时间由相邻锚点继承，整段照常对齐。
+      final _Session session = _Session(<int>[0, 1, 1, 0]);
+      final AsrDecodedSegment result = (await _aligner(
+        session,
+      ).align(_speech(session), _text(<String>['ax'])))!;
+      expect(result.tokens, <String>['ax']);
+      expect(result.tokenOffsetsMs, <int>[20]);
+      expect(result.tokenEndOffsetsMs, <int>[60]);
+      expect(session.calls, 1);
+    },
+  );
+
+  test(
+    'a mostly out-of-vocabulary body is unmeasurable, not a failure',
+    () async {
+      // 能进声学路径的字不到一半：剩下的锚点撑不住整段时间分配，判无从度量。
       final _Session session = _Session(<int>[0, 1, 0]);
-      await expectLater(
-        _aligner(session).align(_speech(session), _text(<String>['ax'])),
-        throwsStateError,
+      expect(
+        await _aligner(session).align(_speech(session), _text(<String>['axx'])),
+        isNull,
       );
       expect(session.calls, 0);
     },
   );
 
-  test('punctuation alone and missing audio cannot be aligned', () async {
+  test('punctuation-only body carries no acoustic evidence', () async {
     final _Session session = _Session(<int>[0, 1, 0]);
-    await expectLater(
-      _aligner(session).align(_speech(session), _text(<String>['… '])),
-      throwsStateError,
+    expect(
+      await _aligner(session).align(_speech(session), _text(<String>['… '])),
+      isNull,
     );
+    expect(session.calls, 0);
+  });
+
+  test('missing audio is a wiring error, not an unalignable segment', () async {
+    final _Session session = _Session(<int>[0, 1, 0]);
     await expectLater(
       _aligner(session).align(
         AsrSpeechSegment(startSample: 0, samples: Float32List(0)),
@@ -124,19 +146,19 @@ void main() {
     'empty transcript creates no invented speech or unnecessary inference',
     () async {
       final _Session session = _Session(<int>[0, 0]);
-      final AsrDecodedSegment result = await _aligner(
+      final AsrDecodedSegment result = (await _aligner(
         session,
-      ).align(_speech(session), AsrDecodedSegment.empty);
+      ).align(_speech(session), AsrDecodedSegment.empty))!;
       expect(result.isEmpty, isTrue);
       expect(session.calls, 0);
     },
   );
 
-  test('impossible repeated-character CTC path fails', () async {
+  test('impossible repeated-character CTC path is unalignable', () async {
     final _Session session = _Session(<int>[1, 1]);
-    await expectLater(
-      _aligner(session).align(_speech(session), _text(<String>['aa'])),
-      throwsStateError,
+    expect(
+      await _aligner(session).align(_speech(session), _text(<String>['aa'])),
+      isNull,
     );
     expect(session.calls, 1);
   });
@@ -146,9 +168,9 @@ void main() {
     () async {
       for (final bool uniform in <bool>[false, true]) {
         final _Session session = _Session(<int>[0, 0, 0, 0], uniform: uniform);
-        await expectLater(
-          _aligner(session).align(_speech(session), _text(<String>['a'])),
-          throwsStateError,
+        expect(
+          await _aligner(session).align(_speech(session), _text(<String>['a'])),
+          isNull,
         );
       }
     },

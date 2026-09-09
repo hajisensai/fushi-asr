@@ -21,7 +21,14 @@ class AsrModelAligner {
 
   /// Keeps token strings and order intact; all returned offsets are newly
   /// derived from the second inference, never copied from the first pass.
-  Future<AsrDecodedSegment> align(
+  ///
+  /// 返回 null = **这一段对不齐**：声学证据不足（第一遍多半是对着音乐/环境音
+  /// 幻听出来的），或正文里能进声学路径的字符太少、无从度量。这是正常结果不是
+  /// 错误，调用方丢掉这段继续跑即可——一段废音频不该炸掉整份转录。
+  ///
+  /// 仍然抛异常的只剩**装配错误**（词表形态不对、模型输出宽度与词表不符、对齐
+  /// 结果越界或逆序）：那是程序员错误，掩盖它只会让人多调试几天。
+  Future<AsrDecodedSegment?> align(
     AsrSpeechSegment speech,
     AsrDecodedSegment transcript,
   ) async {
@@ -31,25 +38,38 @@ class AsrModelAligner {
     }
     final List<int> targets = <int>[];
     final List<int> owners = <int>[];
+    int speechCharacters = 0;
+    int unmappedCharacters = 0;
     for (int i = 0; i < transcript.tokens.length; i++) {
       for (final int rune in transcript.tokens[i].runes) {
         final String character = String.fromCharCode(rune);
         // Punctuation is silent. Do not force it into the acoustic path even
         // when the vocabulary happens to contain a punctuation token.
         if (_nonSpeech.hasMatch(character)) continue;
+        speechCharacters++;
         AsrCtcEncodedText encoded = _encoder.encode(character);
         if (encoded.isEmpty) encoded = _encoder.encode(character.toLowerCase());
         if (encoded.isEmpty) {
-          throw StateError(
-            '字幕调轴模型词表不支持正文字符 U+${rune.toRadixString(16).toUpperCase()}',
-          );
+          // 词表外字符与标点同路：跳过，不进声学路径，时间由相邻锚点继承
+          // （[AsrCtcTextEncoder.encode] 本来就是「查不到就跳过」的语义，填
+          // `<unk>` 会吸收任意帧、毁掉对齐）。一遍模型与调轴模型是两张互不相
+          // 干的字符表——实测日语 transducer 能吐出的 4823 个汉字里有 1302 个
+          // （27%）不在 Omnilingual 调轴词表里，把这种常态当致命错误，等于让
+          // 任何一段日语正文都可能随时炸掉整份转录。
+          unmappedCharacters++;
+          continue;
         }
         targets.addAll(encoded.ids);
         owners.addAll(List<int>.filled(encoded.length, i));
       }
     }
-    if (targets.isEmpty || speech.samples.isEmpty) {
-      throw StateError('字幕调轴缺少可对齐的正文或音频');
+    if (speech.samples.isEmpty) {
+      throw StateError('字幕调轴缺少可对齐的音频');
+    }
+    // 能落到声学路径的字符不到一半时，剩下的锚点撑不住整段正文的时间分配：
+    // 判这段无从度量，交给调用方丢弃，而不是拿半份证据硬对出一份假时间。
+    if (targets.isEmpty || unmappedCharacters * 2 > speechCharacters) {
+      return null;
     }
     final AsrCtcLogits logits = await _decoder.runLogits(speech.samples);
     if (logits.vocab != _tokens.size || logits.frames <= 0) {
@@ -63,7 +83,8 @@ class AsrModelAligner {
       blankId: _tokens.blankId,
     );
     if (alignment == null || !alignment.totalLogProb.isFinite) {
-      throw StateError('字幕调轴无法建立有效路径：音频帧不足、对齐预算超限或模型输出无效');
+      // 音频帧不足 / 对齐预算超限 / 路径概率下溢：这一段对不出可信路径。
+      return null;
     }
     // A forced path exists even for unrelated/silent audio. Require acoustic
     // evidence above a uniform vocabulary distribution instead of accepting
@@ -75,7 +96,11 @@ class AsrModelAligner {
         ) /
         alignment.tokens.length;
     if (!evidence.isFinite || evidence <= -math.log(logits.vocab)) {
-      throw StateError('字幕调轴未找到足够的正文语音证据');
+      // 比在整个词表上均匀瞎猜还差 = 这段音频根本没在说这段正文。门槛保持
+      // `-ln(vocab)` 这条硬下界，不要为了让某个素材通过而放宽它：放宽只会把
+      // 幻听 cue 放进字幕，而这里正是整条流水线上唯一存在的置信度信号
+      // （一遍的 RNN-T 贪心解码只取 argmax，不产出任何置信度）。
+      return null;
     }
     final List<int?> starts = List<int?>.filled(transcript.tokens.length, null);
     final List<int?> ends = List<int?>.filled(transcript.tokens.length, null);
