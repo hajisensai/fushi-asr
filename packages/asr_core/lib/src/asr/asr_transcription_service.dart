@@ -92,16 +92,38 @@ class AsrTranscribePlan {
   /// （BUG-1163 同一条纪律）。
   final String? probeError;
 
-  bool get modelReady =>
-      modelStatus.ready && (alignmentModelStatus?.ready ?? true);
-  int get totalModelBytes =>
-      modelStatus.totalBytes + (alignmentModelStatus?.totalBytes ?? 0);
-  int get obtainedModelBytes =>
-      modelStatus.obtainedBytes + (alignmentModelStatus?.obtainedBytes ?? 0);
+  /// 能不能开始转录 —— **只看识别模型**。
+  ///
+  /// 调轴模型是增强（把时间轴从 VAD 边界改成声学定位），不是前置。以前它被算进
+  /// 这里，于是一个约 985 MB 的可选增强把约 150 MB 的核心功能整个挡住：选日语
+  /// 小模型会被要求先下 1B 调轴模型，删掉调轴模型后小模型直接不能选。可选的东西
+  /// 不该有否决权 —— 缺了就降级成不调轴（见 [alignmentReady]），不是不让转录。
+  bool get modelReady => modelStatus.ready;
+
+  /// 调轴模型是否就绪。false 时仍可转录，只是时间轴退回 VAD/发射时间。
+  ///
+  /// 识别模型本身就是字符级 CTC（Omnilingual）时不需要额外模型，这里恒 true。
+  bool get alignmentReady => alignmentModelStatus?.ready ?? true;
+
+  int get totalModelBytes => modelStatus.totalBytes;
+  int get obtainedModelBytes => modelStatus.obtainedBytes;
+
+  /// 开始转录还差多少字节 —— 不含调轴模型，界面上别把两者加在一起报给用户：
+  /// 那正是「小模型要下 1 GB」这个观感的来源。
   int get bytesToDownload => (totalModelBytes - obtainedModelBytes).clamp(
         0,
         totalModelBytes,
       );
+
+  /// 想要声学调轴还需要下载多少字节（已就绪或不需要时为 0）。
+  int get alignmentBytesToDownload {
+    final AsrModelStatus? status = alignmentModelStatus;
+    if (status == null || status.ready) return 0;
+    return (status.totalBytes - status.obtainedBytes).clamp(
+      0,
+      status.totalBytes,
+    );
+  }
 }
 
 /// 一次正在运行的转录。用完必须 [dispose] 释放 native 会话。
@@ -339,12 +361,18 @@ class AsrTranscriptionService {
     );
   }
 
+  /// 下载识别模型；[includeAlignment] 为真时**再**下调轴模型。
+  ///
+  /// 默认不带调轴模型：它约 985 MB，而识别模型约 150 MB，把两者绑进同一个「下载
+  /// 模型」按钮，用户看到的就是「小模型要下 1 GB」。要调轴就显式要。
   Stream<ModelDownloadEvent> downloadModel({
     required AsrLanguage language,
     required AsrEncoderVariant variant,
+    bool includeAlignment = false,
   }) async* {
     final AsrModelStore store = await _openStore(language);
-    final bool needsAlignmentModel = alignGeneratedSubtitles &&
+    final bool needsAlignmentModel = includeAlignment &&
+        alignGeneratedSubtitles &&
         store.pack.architecture != AsrModelArchitecture.ctc;
     await for (final ModelDownloadEvent event in store.download(variant)) {
       if (!needsAlignmentModel || !event.done) yield event;
@@ -490,10 +518,21 @@ class AsrTranscriptionService {
   }) async {
     final AsrModelStore store = await _openStore(language);
     final Directory jobDir = await jobDirFor(audioPaths, language);
-    final AsrModelStore? alignmentStore = alignGeneratedSubtitles &&
+    AsrModelStore? alignmentStore = alignGeneratedSubtitles &&
             store.pack.architecture != AsrModelArchitecture.ctc
         ? await _openAlignmentStore()
         : null;
+    // 调轴模型没下：**降级成不调轴**，而不是拒绝转录或去载一个不存在的模型
+    // （后者会在装载时抛 AsrModelFileUnusableException，把「少一个可选增强」
+    // 变成「整趟转录失败」）。时间轴退回 VAD/发射时间，正文一个字不受影响。
+    if (alignmentStore != null &&
+        !(await alignmentStore.status(AsrEncoderVariant.int8)).ready) {
+      developer.log(
+        'ASR alignment model missing; transcribing without acoustic alignment',
+        name: kAsrLogName,
+      );
+      alignmentStore = null;
+    }
     // 素材总时长（探测失败的文件按未知处理）：决定装载时预热几个静态桶。
     final int? materialMs = await _probeMaterialMs(audioPaths);
     if (runInIsolate) {

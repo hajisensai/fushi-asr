@@ -87,12 +87,19 @@ void main() {
         preference: AsrAccelerationPreference.cpuOnly,
       );
       expect(plan.alignmentModelStatus, isNotNull);
-      expect(plan.modelReady, isFalse);
-      expect(
-          plan.totalModelBytes,
-          plan.modelStatus.totalBytes +
-              kAsrOmnilingualPack.totalBytes(AsrEncoderVariant.int8));
-      expect(plan.bytesToDownload, plan.totalModelBytes);
+      // 调轴模型是增强不是前置：它没下也照样能开始转录，只是时间轴退回 VAD/
+      // 发射时间。以前它被算进 modelReady，于是 985 MB 的可选增强把 150 MB 的
+      // 核心功能整个挡住（「选日语小模型提示要下 1 GB」）。
+      expect(plan.modelReady, isFalse, reason: '识别模型本身也没下');
+      expect(plan.alignmentReady, isFalse);
+      // 报给用户的「还要下多少」只含识别模型，不把调轴模型加进去。
+      expect(plan.totalModelBytes, plan.modelStatus.totalBytes);
+      expect(plan.bytesToDownload, plan.modelStatus.totalBytes);
+      expect(plan.alignmentBytesToDownload,
+          kAsrOmnilingualPack.totalBytes(AsrEncoderVariant.int8));
+      expect(plan.bytesToDownload,
+          lessThan(plan.alignmentBytesToDownload),
+          reason: '识别模型远小于调轴模型，两者不能合并成一个数字报给用户');
       final Directory originalDir = await service(_ProbeFactory())
           .jobDirFor(<String>['a.mp3'], AsrLanguage.japanese);
       final Directory alignedDir =
