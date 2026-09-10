@@ -14,6 +14,7 @@ class Controlled implements TranscribeService {
   Future<TranscribeOutcome> run(
       {required List<String> audioPaths,
       required AsrLanguage language,
+      required AsrAudioProfile audioProfile,
       SubtitleFormat format = SubtitleFormat.srt,
       void Function(TranscribeProgress)? onProgress,
       TranscribeCancellation? cancellation}) async {

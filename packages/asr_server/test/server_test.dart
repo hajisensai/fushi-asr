@@ -19,15 +19,21 @@ class _FakeService implements TranscribeService {
   int calls = 0;
   final paths = <String>[];
 
+  /// 服务端传下来的素材属性：默认必须是 mixedAudio（正确优先），clean 只能由
+  /// 调用方显式断言。
+  AsrAudioProfile? lastProfile;
+
   @override
   Future<TranscribeOutcome> run({
     required List<String> audioPaths,
     required AsrLanguage language,
+    required AsrAudioProfile audioProfile,
     SubtitleFormat format = SubtitleFormat.srt,
     void Function(TranscribeProgress progress)? onProgress,
     TranscribeCancellation? cancellation,
   }) async {
     calls++;
+    lastProfile = audioProfile;
     paths.addAll(audioPaths);
     onProgress?.call(const TranscribeProgress(
       phase: 'transcribe',
@@ -98,6 +104,23 @@ Future<List<Map<String, Object?>>> _postRaw(
 
 void main() {
   final List<int> audio = utf8.encode('not really audio');
+
+  test('素材属性默认按混音处理，clean 只能由调用方显式断言', () async {
+    // 能量门限是带前提的优化，服务端无从判断上传的是有声书还是番剧。默认取
+    // 正确的那条（mixedAudio），漏了声明也不会静默拿到会幻听的快路径。
+    final _FakeService service = _FakeService();
+    final ({AsrServer server, Uri uri}) s = await _start(service);
+    addTearDown(s.server.stop);
+    await _postRaw(s.uri, audio);
+    expect(service.lastProfile, AsrAudioProfile.mixedAudio);
+    await _postRaw(s.uri, audio, query: 'language=ja&audioProfile=clean');
+    expect(service.lastProfile, AsrAudioProfile.cleanSpeech);
+    // 拼错不当成 clean，也不当成 mixed：直接拒。
+    final List<Map<String, Object?>> bad =
+        await _postRaw(s.uri, audio, query: 'language=ja&audioProfile=nope');
+    expect('${bad.last['error']}', contains('audioProfile'));
+    expect(service.calls, 2);
+  });
 
   test(
       'EPUB multipart runs shared alignment and returns raw plus aligned subtitles',
@@ -438,6 +461,7 @@ class _SlowService implements TranscribeService {
   Future<TranscribeOutcome> run({
     required List<String> audioPaths,
     required AsrLanguage language,
+    required AsrAudioProfile audioProfile,
     SubtitleFormat format = SubtitleFormat.srt,
     void Function(TranscribeProgress progress)? onProgress,
     TranscribeCancellation? cancellation,

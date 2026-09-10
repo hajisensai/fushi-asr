@@ -59,6 +59,7 @@ void main() {
 
   AsrTranscriptionService service(_ProbeFactory factory) =>
       AsrTranscriptionService(
+      audioProfile: AsrAudioProfile.cleanSpeech,
         backend: const AsrIsolateBackend(buildFactory: _unusedFactory),
         loader: AsrEngineLoader(factory: factory),
         openStore: (AsrLanguage l) async =>
@@ -71,6 +72,7 @@ void main() {
     test('second pass includes aligner download and isolates old cached jobs',
         () async {
       final AsrTranscriptionService aligned = AsrTranscriptionService(
+      audioProfile: AsrAudioProfile.cleanSpeech,
         backend: const AsrIsolateBackend(buildFactory: _unusedFactory),
         loader: AsrEngineLoader(factory: _ProbeFactory()),
         openStore: (AsrLanguage l) async =>

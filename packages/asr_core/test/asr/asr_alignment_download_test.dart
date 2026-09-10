@@ -50,6 +50,7 @@ AsrTranscriptionService _service(
   Future<AsrModelStore> Function() alignment,
 ) =>
     AsrTranscriptionService(
+      audioProfile: AsrAudioProfile.cleanSpeech,
       backend: const AsrIsolateBackend(buildFactory: _unusedFactory),
       openStore: (AsrLanguage language) async => first,
       openAlignmentStore: alignment,

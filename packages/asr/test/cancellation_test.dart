@@ -45,7 +45,7 @@ void main() {
     await expectLater(
         runner.run(
             audioPaths: [],
-            language: AsrLanguage.japanese,
+            language: AsrLanguage.japanese, audioProfile: AsrAudioProfile.cleanSpeech,
             cancellation: token),
         throwsA(isA<TranscribeCancelled>()));
     await runner.close();

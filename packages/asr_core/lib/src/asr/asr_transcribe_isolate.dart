@@ -54,7 +54,7 @@ class AsrIsolateJobSpec {
     required this.audioPaths,
     required this.jobDirPath,
     required this.chunkSeconds,
-    required this.segmenterKind,
+    required this.audioProfile,
     this.batchSize,
     this.usePipeline = true,
     this.useFp16Encoder = true,
@@ -79,7 +79,7 @@ class AsrIsolateJobSpec {
   final List<String> audioPaths;
   final String jobDirPath;
   final int chunkSeconds;
-  final AsrSegmenterKind segmenterKind;
+  final AsrAudioProfile audioProfile;
 
   final bool usePipeline;
 
@@ -451,16 +451,19 @@ Future<void> _isolateMain(_IsolateArgs args) async {
       audioPaths: spec.audioPaths,
       modelId: store.pack.id,
       pcm: pcm,
-      segmenter: switch (spec.segmenterKind) {
-        AsrSegmenterKind.energy => AsrVadSegmenter(
-            scorer: EnergyVadScorer(),
-            maxSegmentMs: maxSegmentMs,
-          ),
-        AsrSegmenterKind.silero => AsrVadSegmenter(
-            session: sessions.vad,
-            maxSegmentMs: maxSegmentMs,
-          ),
-      },
+      segmenter: switch (spec.audioProfile) {
+          // 干净朗读：语音与静默双模态可分，纯 Dart 能量门限够用且免掉每窗口
+          // 一次 ONNX 前向（有声书上实测占整条流水线七成）。
+          AsrAudioProfile.cleanSpeech => AsrVadSegmenter(
+              scorer: EnergyVadScorer(),
+              maxSegmentMs: maxSegmentMs,
+            ),
+          // 混音素材：能量门限的前提不成立，只能用神经网络 VAD。
+          AsrAudioProfile.mixedAudio => AsrVadSegmenter(
+              session: sessions.vad,
+              maxSegmentMs: maxSegmentMs,
+            ),
+        },
       decoder: decoder,
       alignSegment: aligner?.align,
       batchSize: spec.batchSize ??

@@ -53,7 +53,7 @@ $converter
             void Function(TranscribeProgress)? onProgress}) =>
         adapter.run(
             audioPaths: [audio],
-            language: AsrLanguage.japanese,
+            language: AsrLanguage.japanese, audioProfile: AsrAudioProfile.cleanSpeech,
             cancellation: cancellation,
             onProgress: onProgress);
 

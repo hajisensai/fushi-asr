@@ -32,26 +32,38 @@ import 'package:fushi_asr_core/src/onnx/model_file_downloader.dart';
 import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 import 'package:fushi_asr_core/src/util/asr_paths.dart';
 
-/// 切段器种类：默认能量门限（零模型调用，见 `asr_vad.dart` 文件头的实测依据）；
-/// silero 作为带背景音乐/噪声音源的可选高质量路径。
+/// 素材的声学属性：调用方对**自己的输入**作出的断言。
 ///
-/// **配混音音源（动画、影视、任何带 BGM 的素材）必须显式选 [silero]，能量门限
-/// 在这类素材上不是「差一点」而是不成立**，别指望调参数救回来。2026-09-10 在
-/// 一集 Re:Zero 的 5:11.596–5:21.600（实际无对白）上实测：
-/// - 能量门限判 190/312 帧为语音，Silero 只判 6/312；
-/// - [EnergyVadScorer] 的门限是「最近 30 s 电平的 p10 + 12 dB」，前提是语音与
-///   静默构成双模态、门限落进中间的空谷。该段实测 p10 −39.3 / p50 −27.3 /
-///   p90 −21.8 dBFS，整段挤在 17.5 dB 的窄带里，**根本没有空谷**；
-/// - 去掉 [EnergyVadScorer.maxThresholdDb] 的夹紧仍有 158/312 帧判语音；要压到
-///   Silero 那 6 帧，门限得推到 −14.9 dBFS（≈本段峰值），那会让全片正常对白
-///   大面积漏掉。
+/// 这里刻意不是「选哪个 VAD 实现」——调用方不知道该选哪个，但它一定知道自己在
+/// 转什么。实现映射只发生在一处（切段器的构造点）。
 ///
-/// 后果不止是多切几段废音频：一遍解码会对着纯 BGM 幻听出一两拍感叹词（同一段
-/// GPU 出「うん」、CPU 出「うわ」，CTC 独立识别为空），这些 cue 会直接进字幕。
-///
-/// 代价是已经付过的：`silero_vad.onnx` 是每个语言包的必下文件，会话在引擎装载
-/// 时无条件打开（跑 energy 时它也开着），切过去零新依赖、零额外下载。
-enum AsrSegmenterKind { energy, silero }
+/// **没有默认值是有意的。** 能量门限是一个带前提的性能优化，前提是「语音与背景
+/// 在能量上双模态可分」。这个前提以前是隐含的、没人检查的默认值，于是失效时
+/// 静默给出自信的错误答案：2026-09-10 在一集 Re:Zero（内封英文字幕作真值）上
+/// 实测，能量门限把 **89.3% 的片长**（219 段 / 1428.1 s）送进 ASR，其中
+/// **34.6%（493.7 s）落在任何对白之外**，**31 段（14.2%）整段没有一句对白**
+/// ——每一段都是一次幻听机会，而幻听出的 cue 会直接进字幕。让每个调用方显式
+/// 签字，才是这个前提唯一可靠的检查方式。
+enum AsrAudioProfile {
+  /// 干净朗读：语音与静默的能量差 30 dB 以上，构成清晰的双模态分布。
+  /// 有声书、录音棚 TTS、口述录音。
+  ///
+  /// 这是一个**断言**，不是偏好。选错的代价见 [mixedAudio]。
+  cleanSpeech,
+
+  /// 混音素材：动画、影视、任何带持续 BGM 或环境声的音源。
+  ///
+  /// 这类素材上能量门限不是「差一点」，是前提不成立，**调参数救不回来**：
+  /// 上述那一集的失败段实测电平分布 p10 −39.3 / p50 −27.3 / p90 −21.8 dBFS，
+  /// 整段挤在 17.5 dB 的窄带里，根本没有可供门限落脚的空谷；去掉
+  /// [EnergyVadScorer.maxThresholdDb] 的夹紧仍有 158/312 帧判语音，要压到
+  /// Silero 那 6/312 帧得把门限推到 −14.9 dBFS（≈本段峰值），代价是全片正常
+  /// 对白大面积漏掉。
+  ///
+  /// 代价已经付过：`silero_vad.onnx` 是每个语言包的必下文件，会话在引擎装载时
+  /// 无条件打开（跑能量门限时它也开着），零新依赖、零额外下载。
+  mixedAudio,
+}
 
 /// 开跑前的计划：哪个语言包、会用哪个编码器变体、期望落到哪个 EP、模型是否就绪。
 @immutable
@@ -177,7 +189,7 @@ class AsrTranscriptionService {
     Future<Directory> Function()? jobsRoot,
     this.batchSize,
     this.chunkSeconds = 300,
-    this.segmenterKind = AsrSegmenterKind.energy,
+    required this.audioProfile,
     this.runInIsolate = true,
     this.usePipeline = true,
     this.useFp16Encoder = true,
@@ -224,7 +236,8 @@ class AsrTranscriptionService {
   /// （见 [AsrTranscribeJob.batchSize]）。
   final int? batchSize;
   final int chunkSeconds;
-  final AsrSegmenterKind segmenterKind;
+  /// 见 [AsrAudioProfile]：调用方对素材的断言，**没有默认值**。
+  final AsrAudioProfile audioProfile;
 
   /// 真转录是否下放后台 isolate（生产默认 true）。false 走进程内路径，注入的
   /// [AsrEngineLoader] / [AsrPcmSource] 只在该路径生效——闭包与 fake 会话过不了
@@ -495,7 +508,7 @@ class AsrTranscriptionService {
           audioPaths: List<String>.unmodifiable(audioPaths),
           jobDirPath: jobDir.path,
           chunkSeconds: chunkSeconds,
-          segmenterKind: segmenterKind,
+          audioProfile: audioProfile,
           batchSize: batchSize,
           usePipeline: usePipeline,
           useFp16Encoder: useFp16Encoder,
@@ -545,12 +558,15 @@ class AsrTranscriptionService {
         audioPaths: audioPaths,
         modelId: store.pack.id,
         pcm: _pcm,
-        segmenter: switch (segmenterKind) {
-          AsrSegmenterKind.energy => AsrVadSegmenter(
+        segmenter: switch (audioProfile) {
+          // 干净朗读：语音与静默双模态可分，纯 Dart 能量门限够用且免掉每窗口
+          // 一次 ONNX 前向（有声书上实测占整条流水线七成）。
+          AsrAudioProfile.cleanSpeech => AsrVadSegmenter(
               scorer: EnergyVadScorer(),
               maxSegmentMs: maxSegmentMs,
             ),
-          AsrSegmenterKind.silero => AsrVadSegmenter(
+          // 混音素材：能量门限的前提不成立，只能用神经网络 VAD。
+          AsrAudioProfile.mixedAudio => AsrVadSegmenter(
               session: sessions.vad,
               maxSegmentMs: maxSegmentMs,
             ),

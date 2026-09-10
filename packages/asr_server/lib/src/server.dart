@@ -260,6 +260,24 @@ class AsrServer {
       });
       return;
     }
+    // 素材属性：**默认按混音处理**。能量门限是带前提的优化，前提不成立时会把
+    // 持续背景声整段判成语音再交给 ASR 幻听（一集动画实测 31 段整段无对白）。
+    // 服务端无从判断上传的是有声书还是番剧，所以默认取正确的那条，快路径必须
+    // 由调用方显式声明 `?audioProfile=clean` 来断言「语音与静默双模态可分」。
+    final String profileName =
+        request.uri.queryParameters['audioProfile'] ?? 'mixed';
+    final AsrAudioProfile? audioProfile = switch (profileName) {
+      'clean' => AsrAudioProfile.cleanSpeech,
+      'mixed' => AsrAudioProfile.mixedAudio,
+      _ => null,
+    };
+    if (audioProfile == null) {
+      response.statusCode = HttpStatus.badRequest;
+      await _json(response, <String, Object?>{
+        'error': '未知 audioProfile "$profileName"，可选 clean / mixed',
+      });
+      return;
+    }
     final String formatName = request.uri.queryParameters['format'] ?? 'srt';
     final SubtitleFormat? format = SubtitleFormat.fromName(formatName);
     if (format == null) {
@@ -392,6 +410,7 @@ class AsrServer {
             await (backend?.service ?? runner).run(
           audioPaths: <String>[upload.path],
           language: language,
+          audioProfile: audioProfile,
           format: format,
           cancellation: cancellation,
           onProgress: (TranscribeProgress p) => emit(p.toJson()),
