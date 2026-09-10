@@ -24,6 +24,8 @@ class TranscribeProgress {
     this.totalMs = 0,
     this.detail = '',
     this.detailCode = '',
+    this.unalignedSegments = 0,
+    this.estimatedBoundarySegments = 0,
   });
 
   /// `download` / `load` / `transcribe` / `done`。
@@ -41,6 +43,14 @@ class TranscribeProgress {
   /// 显示。两者并存，各取所需——**新增说明必须同时给 code**，否则又会多出一条
   /// 只有一种语言的文案。
   final String detailCode;
+  /// 声学调轴判定对不齐、因而没进字幕的段数（跨暂停累计）。
+  ///
+  /// 必须一路透传到宿主：这份字幕缺了段，只有把它显示出来，用户才不会拿一份
+  /// 缺段的字幕当完整的用。
+  final int unalignedSegments;
+
+  /// 含推定端点（调轴词表缺字压在 token 首/尾）的段数：这些段不是完整声学对齐。
+  final int estimatedBoundarySegments;
 
   double get fraction => totalMs <= 0 ? 0 : (processedMs / totalMs).clamp(0, 1);
 
@@ -51,6 +61,9 @@ class TranscribeProgress {
         'fraction': fraction,
         if (detail.isNotEmpty) 'detail': detail,
         if (detailCode.isNotEmpty) 'detailCode': detailCode,
+        if (unalignedSegments > 0) 'unalignedSegments': unalignedSegments,
+        if (estimatedBoundarySegments > 0)
+          'estimatedBoundarySegments': estimatedBoundarySegments,
       };
 }
 
@@ -65,6 +78,8 @@ class TranscribeOutcome implements RetimingTranscription {
     this.decodeStats,
     required this.elapsed,
     required this.audioMs,
+    this.unalignedSegments = 0,
+    this.estimatedBoundarySegments = 0,
   });
 
   /// 按请求格式渲染好的字幕文本。
@@ -77,6 +92,14 @@ class TranscribeOutcome implements RetimingTranscription {
 
   /// Native engines do not have an ONNX execution provider.
   final String engine;
+
+  /// 声学调轴判定对不齐、没进这份字幕的段数。大于 0 时这份字幕是**缺段**的：
+  /// 宿主必须告诉用户，别让「完成」把它盖过去。
+  final int unalignedSegments;
+
+  /// 含推定端点的段数（调轴词表缺字压在 token 首/尾）。这些段的时间不是完整的
+  /// 声学对齐，试听复核时要优先看它们。
+  final int estimatedBoundarySegments;
   @override
   final List<AsrCueTokenTiming>? tokenTimings;
 
@@ -102,9 +125,13 @@ enum MissingModelPolicy {
 /// 前提下测服务端自己的行为（编码、错误路径、并发闸门），二来将来要接别的执行
 /// 后端也不用动服务端。
 abstract interface class TranscribeService {
+  /// [audioProfile] **没有默认值**：切段的前提由调用方声明，见
+  /// [AsrAudioProfile]。原生 Apple 引擎不做 VAD 切段，会忽略它，但接口不为此开
+  /// 口子——留一个可省略的参数，就等于把「忘了声明」重新变成合法写法。
   Future<TranscribeOutcome> run({
     required List<String> audioPaths,
     required AsrLanguage language,
+    required AsrAudioProfile audioProfile,
     SubtitleFormat format,
     void Function(TranscribeProgress progress)? onProgress,
     TranscribeCancellation? cancellation,
@@ -177,6 +204,7 @@ class TranscribeRunner implements TranscribeService, ModelProvisioning {
   Future<TranscribeOutcome> run({
     required List<String> audioPaths,
     required AsrLanguage language,
+    required AsrAudioProfile audioProfile,
     SubtitleFormat format = SubtitleFormat.srt,
     void Function(TranscribeProgress progress)? onProgress,
     TranscribeCancellation? cancellation,
@@ -189,9 +217,11 @@ class TranscribeRunner implements TranscribeService, ModelProvisioning {
     if (forceCoreMl && reuseCoreMlSessions && Platform.isMacOS) {
       final worker = await (_worker ??=
           _CoreMlWorker.spawn(registry, dataRoot, missingModel));
-      return worker.run(audioPaths, language, format, onProgress, cancellation);
+      return worker.run(
+          audioPaths, language, audioProfile, format, onProgress, cancellation);
     }
     return _run(
+      audioProfile: audioProfile,
         audioPaths: audioPaths,
         language: language,
         format: format,
@@ -202,6 +232,7 @@ class TranscribeRunner implements TranscribeService, ModelProvisioning {
   Future<TranscribeOutcome> _run({
     required List<String> audioPaths,
     required AsrLanguage language,
+    required AsrAudioProfile audioProfile,
     required SubtitleFormat format,
     void Function(TranscribeProgress progress)? onProgress,
     OnnxSessionFactory? sessionFactory,
@@ -234,8 +265,10 @@ class TranscribeRunner implements TranscribeService, ModelProvisioning {
       ));
     }
 
-    final AsrTranscriptionService service =
-        _newTranscriptionService(sessionFactory: sessionFactory);
+    final AsrTranscriptionService service = _newTranscriptionService(
+      audioProfile: audioProfile,
+      sessionFactory: sessionFactory,
+    );
     final AsrAccelerationPreference preference = _preference;
 
     final AsrTranscribePlan plan = await service.plan(
@@ -309,6 +342,8 @@ class TranscribeRunner implements TranscribeService, ModelProvisioning {
               phase: 'transcribe',
               processedMs: progress.processedMs,
               totalMs: progress.totalMs,
+              unalignedSegments: progress.unalignedSegments,
+              estimatedBoundarySegments: progress.estimatedBoundarySegments,
             ));
           case AsrTranscribePausedEvent():
             cancellation?.throwIfCancelled();
@@ -328,6 +363,8 @@ class TranscribeRunner implements TranscribeService, ModelProvisioning {
         phase: 'done',
         processedMs: finished.totalMs,
         totalMs: finished.totalMs,
+        unalignedSegments: finished.unalignedSegments,
+        estimatedBoundarySegments: finished.estimatedBoundarySegments,
       ));
       return TranscribeOutcome(
         // srt 直接用产物原文，不经解析再渲染一遍：那样会把核心写出来的东西
@@ -342,6 +379,8 @@ class TranscribeRunner implements TranscribeService, ModelProvisioning {
         decodeStats: running.decodeStats,
         elapsed: watch.elapsed,
         audioMs: finished.totalMs,
+        unalignedSegments: finished.unalignedSegments,
+        estimatedBoundarySegments: finished.estimatedBoundarySegments,
       );
     } finally {
       detach?.call();
@@ -362,10 +401,16 @@ class TranscribeRunner implements TranscribeService, ModelProvisioning {
   /// 这个查询更糟。
   /// [sessionFactory] 只有 [_run] 会传（测试注入的会话工厂）；查询路径
   /// （[planFor] / [pullModel]）不需要会话，走默认的 isolate 后端。
+  ///
+  /// [audioProfile] 保持必填：它决定用哪种 VAD 切段，而能量门限只在「语音与静默
+  /// 双模态可分」时成立。给它一个默认值，就等于让混音素材（动画/影视）静默走上
+  /// 一条会把背景音判成语音的路——那正是上游把这个参数改成必填要消灭的东西。
   AsrTranscriptionService _newTranscriptionService({
+    required AsrAudioProfile audioProfile,
     OnnxSessionFactory? sessionFactory,
   }) =>
       AsrTranscriptionService(
+        audioProfile: audioProfile,
         // managedRuntimeDir 是 per-isolate 静态字段，过不了边界：不把它显式
         // 送进去，推理 isolate 会重新解析候选并撞回系统目录里的旧 ORT。
         backend: AsrIsolateBackend(
@@ -398,7 +443,11 @@ class TranscribeRunner implements TranscribeService, ModelProvisioning {
   Future<AsrTranscribePlan> planFor({required AsrLanguage language}) async {
     // 不落 ORT 运行时、不建会话：plan 只读模型目录与 EP 探测结果，供「还没开始
     // 转录时就告诉用户会发生什么」用。
-    return _newTranscriptionService().plan(
+    return _newTranscriptionService(
+      // plan() 只读模型目录与 EP 探测结果，不解码也不切音频：audioProfile 只在
+      // 切段与推理 isolate 规格里被读到，这条路径结构上到不了它。
+      audioProfile: AsrAudioProfile.cleanSpeech,
+    ).plan(
       language: language,
       preference: _preference,
     );
@@ -412,7 +461,10 @@ class TranscribeRunner implements TranscribeService, ModelProvisioning {
     // 先确保 ORT 运行时在位：模型本体下完了但运行时没有，等于「显示已就绪、
     // 一开跑又卡在下载」——预下载要能真正把首次转录的等待清零。
     yield* ensureOrtRuntime();
-    final AsrTranscriptionService service = _newTranscriptionService();
+    // 同 planFor：预下载只碰模型目录，不切音频。
+    final AsrTranscriptionService service = _newTranscriptionService(
+      audioProfile: AsrAudioProfile.cleanSpeech,
+    );
     final AsrTranscribePlan plan = await service.plan(
       language: language,
       preference: _preference,

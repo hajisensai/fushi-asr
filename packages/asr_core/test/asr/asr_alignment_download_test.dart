@@ -50,6 +50,7 @@ AsrTranscriptionService _service(
   Future<AsrModelStore> Function() alignment,
 ) =>
     AsrTranscriptionService(
+      audioProfile: AsrAudioProfile.cleanSpeech,
       backend: const AsrIsolateBackend(buildFactory: _unusedFactory),
       openStore: (AsrLanguage language) async => first,
       openAlignmentStore: alignment,
@@ -64,7 +65,9 @@ void main() {
     final List<ModelDownloadEvent> events =
         await _service(first, () async => second)
             .downloadModel(
-                language: AsrLanguage.japanese, variant: AsrEncoderVariant.fp32)
+                language: AsrLanguage.japanese,
+                variant: AsrEncoderVariant.fp32,
+                includeAlignment: true)
             .toList();
     expect(first.variants, <AsrEncoderVariant>[AsrEncoderVariant.fp32]);
     expect(second.variants, <AsrEncoderVariant>[AsrEncoderVariant.int8]);
@@ -92,6 +95,23 @@ void main() {
     });
   }
 
+  test('下载识别模型默认不捎带调轴模型', () async {
+    // 回归：调轴模型约 985 MB、识别模型约 150 MB，绑在同一个「下载模型」按钮上，
+    // 用户看到的就是「选个小模型要下 1 GB」。要调轴模型必须显式索取。
+    final _Store first = _Store(asrModelPackFor(AsrLanguage.japanese), 'asr');
+    final List<ModelDownloadEvent> events = await _service(first, () async {
+      fail('未显式索取时不该去下调轴模型');
+    })
+        .downloadModel(
+            language: AsrLanguage.japanese, variant: AsrEncoderVariant.fp32)
+        .toList();
+    // 不再抑制识别模型自己的 done：后面没有第二段下载了。
+    expect(events.map((ModelDownloadEvent event) => event.fileName),
+        <String>['asr', 'asr', 'asr']);
+    expect(events.where((ModelDownloadEvent event) => event.done),
+        <ModelDownloadEvent>[events.last]);
+  });
+
   test('failure downloading the aligner never emits a premature done event',
       () async {
     final _Store first = _Store(asrModelPackFor(AsrLanguage.japanese), 'asr');
@@ -100,7 +120,9 @@ void main() {
     await expectLater(
       _service(first, () async => second)
           .downloadModel(
-              language: AsrLanguage.japanese, variant: AsrEncoderVariant.int8)
+              language: AsrLanguage.japanese,
+              variant: AsrEncoderVariant.int8,
+              includeAlignment: true)
           .forEach(received.add),
       throwsStateError,
     );

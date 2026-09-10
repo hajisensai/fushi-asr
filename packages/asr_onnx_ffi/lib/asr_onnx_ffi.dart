@@ -5,6 +5,9 @@
 /// ```dart
 /// final service = AsrTranscriptionService(
 ///   backend: const AsrIsolateBackend(buildFactory: buildFfiOnnxFactory),
+///   // 对素材的断言，没有默认值：混音素材（动画/影视）用 mixedAudio，
+///   // 干净朗读（有声书/口述）才用 cleanSpeech。见 AsrAudioProfile。
+///   audioProfile: AsrAudioProfile.mixedAudio,
 /// );
 /// ```
 ///

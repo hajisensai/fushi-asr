@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:fushi_asr/asr.dart';
-import 'package:fushi_asr_core/asr_core.dart';
 import 'package:fushi_asr_server/asr_server.dart';
 import 'package:test/test.dart';
 
@@ -15,6 +14,7 @@ class _PlainService implements TranscribeService {
   Future<TranscribeOutcome> run({
     required List<String> audioPaths,
     required AsrLanguage language,
+    required AsrAudioProfile audioProfile,
     SubtitleFormat format = SubtitleFormat.srt,
     void Function(TranscribeProgress progress)? onProgress,
     TranscribeCancellation? cancellation,
