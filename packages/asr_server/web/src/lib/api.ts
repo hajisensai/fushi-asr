@@ -73,3 +73,58 @@ export function download(result: Result, file: File, raw = false) {
   a.download = file.name.replace(/\.[^.]+$/, '') + '-' + result.engine + (raw ? '-raw' : result.retiming ? '-retimed' : result.alignment ? '-aligned' : '') + '.' + result.format;
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/**
+ * 某个语言的模型现状：下全了没、缺多少、会落到哪个执行后端、EP 探测有没有失败。
+ *
+ * `managed` = 该后端的模型由系统托管（如 Apple SpeechTranscriber），没有可下的
+ * 东西，界面据此隐藏下载入口，而不是显示一个永远点不动的按钮。
+ */
+export type ModelStatus = {
+  language: string;
+  managed: boolean;
+  ready: boolean;
+  variant?: string;
+  provider?: string;
+  totalBytes?: number;
+  obtainedBytes?: number;
+  bytesToDownload?: number;
+  probeError?: string;
+};
+
+export async function modelStatus(language: string, engine: string, token: string, signal?: AbortSignal): Promise<ModelStatus> {
+  const query = new URLSearchParams({ language, ...(engine ? { engine } : {}) });
+  const response = await fetch('v1/models/status?' + query, { headers: auth(token), signal });
+  if (!response.ok) throw new Error(t('error.http', { status: response.status, body: await response.text() }));
+  return response.json() as Promise<ModelStatus>;
+}
+
+/**
+ * 预下载该语言要用的东西（ONNX Runtime + 模型权重），逐文件回报字节进度。
+ *
+ * 事件形状与转录流的 `download` 阶段逐字一致，所以进度渲染复用同一套，前端不必
+ * 认第二种事件。已经齐全时服务端不发任何 download 事件，直接 `complete`。
+ */
+export async function pullModel(language: string, engine: string, token: string, onProgress: (e: ProgressEvent) => void, signal?: AbortSignal): Promise<void> {
+  const query = new URLSearchParams({ language, ...(engine ? { engine } : {}) });
+  const response = await fetch('v1/models/pull?' + query, { method: 'POST', headers: auth(token), signal });
+  if (!response.ok) throw new Error(t('error.http', { status: response.status, body: await response.text() }));
+  if (!response.body) throw new Error(t('error.noStream'));
+  const reader = response.body.getReader(), decoder = new TextDecoder();
+  let buffer = '';
+  function line(value: string) {
+    if (!value.trim()) return;
+    const ev = JSON.parse(value) as ProgressEvent;
+    if (ev.phase === 'error') throw new Error(ev.error || t('error.generate'));
+    if (ev.phase === 'complete') return;
+    onProgress(ev);
+  }
+  try {
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n'); buffer = lines.pop()!; lines.forEach(line);
+    }
+    line(buffer + decoder.decode());
+  } finally { await reader.cancel(); }
+}

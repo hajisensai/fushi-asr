@@ -15,6 +15,9 @@ import { Section, SiteFooter, SiteNav, ToTop } from '@/components/site-chrome';
 import { useT } from '@/lib/i18n-react';
 import type { Key } from '@/lib/i18n';
 import { auth, transcribe, retime, TranscriptionTask } from '@/lib/api';
+import { engineDescription, engineLabel } from '@/lib/engine-label';
+import { ModelStatusPanel } from '@/components/model-status';
+import { progressDetail } from '@/lib/progress-detail';
 import type { Backend, Clock, Format, Language, ProgressEvent, SavedResult, WorkspaceMode } from '@/lib/types';
 import '../progress.js';
 
@@ -85,12 +88,13 @@ export default function App() {
       for (let i = 0; i < list.length; i++) {
         if (stopRequested.current) break;
         const task = new TranscriptionTask(token); activeTask.current = task;
-        const backend = list[i]; clock.begin(); setBatch({ name: backend.name, count: list.length, index: i + 1, start }); setStatus({ key: 'status.uploading', params: { name: backend.name } });
+        const backend = list[i]; clock.begin(); setBatch({ name: engineLabel(backend), count: list.length, index: i + 1, start }); setStatus({ key: 'status.uploading', params: { name: engineLabel(backend) } });
         try {
           const onProgress = (ev: ProgressEvent) => {
             if (task.stopRequested) return;
             clock.event(ev);
-            setStatus({ key: ev.detail ? 'status.phaseDetail' : 'status.phase', params: { name: backend.name, detail: ev.detail ?? '' }, phase: ev.phase });
+            const detail = progressDetail(ev, t);
+            setStatus({ key: detail ? 'status.phaseDetail' : 'status.phase', params: { name: engineLabel(backend), detail }, phase: ev.phase });
           };
           const result = jobSubtitle
             ? await retime(backend, jobFile, jobSubtitle, language, format, token, onProgress, task)
@@ -100,7 +104,7 @@ export default function App() {
           setResults(prev => [...prev, saved].slice(-6));
         } catch (e) {
           if (task.stopRequested) { await task.stopped; clock.cancel(); break; }
-          clock.end(); errors.push(t('error.job', { name: backend.name, message: e instanceof Error ? e.message : String(e) }));
+          clock.end(); errors.push(t('error.job', { name: engineLabel(backend), message: e instanceof Error ? e.message : String(e) }));
         }
       }
       setError(errors.join('\n'));
@@ -123,11 +127,12 @@ export default function App() {
         <FieldGroup className="grid sm:grid-cols-2 gap-4">{isRetiming ? <FileDrop key={'subtitle-' + resetKey} kind="subtitle" file={subtitle} disabled={busy} onChange={setSubtitle} /> : <FileDrop key={'book-' + resetKey} kind="epub" file={book} disabled={busy || audioOnly} onChange={setBook} />}<FileDrop key={'audio-' + resetKey} kind="audio" file={file} disabled={busy} onChange={setFile} /></FieldGroup>
         {isRetiming ? <p className="note mt-4">{t('source.retimeNote')}</p> : null}
         <FieldGroup className="grid sm:grid-cols-[2fr_1fr_1fr] gap-4 mt-6">
-          <Options id="engine" label={t('options.engine')} placeholder={t('options.loading')} value={selected?.id || ''} onChange={setEngine} disabled={busy || !backends.length} options={backends.map(b => ({ value: b.id, label: b.name + (!b.available ? t('options.unavailable') : !b.languages.includes(language) ? t('options.langUnsupported') : ''), disabled: !b.available || !b.languages.includes(language) }))} />
+          <Options id="engine" label={t('options.engine')} placeholder={t('options.loading')} value={selected?.id || ''} onChange={setEngine} disabled={busy || !backends.length} options={backends.map(b => ({ value: b.id, label: engineLabel(b) + (!b.available ? t('options.unavailable') : !b.languages.includes(language) ? t('options.langUnsupported') : ''), disabled: !b.available || !b.languages.includes(language) }))} />
           <Options id="lang" label={t('options.language')} placeholder={t('options.loading')} value={language} onChange={setLanguage} disabled={busy || !languages.length} options={languages.map(l => ({ value: l.tag, label: l.nativeName + ' (' + l.tag + ')' }))} />
           <Options id="fmt" label={t('options.format')} placeholder={t('options.loading')} value={format} onChange={v => setFormat(v as Format)} disabled={busy} options={[{ value: 'srt', label: 'SRT' }, { value: 'vtt', label: 'WebVTT' }, { value: 'json', label: 'JSON' }]} />
         </FieldGroup>
-        <p className="note mt-3" id="engineNote">{selected?.description || t('options.noEngine')}</p>
+        <p className="note mt-3" id="engineNote">{selected ? engineDescription(selected) : t('options.noEngine')}</p>
+        <ModelStatusPanel language={language} engine={selected?.id ?? ''} token={token} disabled={busy} />
         <Collapsible className="mt-3"><CollapsibleTrigger asChild><Button variant="ghost" size="sm"><ChevronRightIcon data-icon="inline-start" />{t('connection.title')}</Button></CollapsibleTrigger><CollapsibleContent><FieldGroup className="max-w-sm mt-3"><Field data-disabled={busy || undefined}><FieldLabel htmlFor="token">{t('connection.token')}</FieldLabel><Input id="token" type="password" autoComplete="off" placeholder={t('connection.tokenHint')} disabled={busy} value={draftToken} onChange={e => setDraftToken(e.target.value)} /></Field><Button variant="outline" disabled={busy} onClick={() => setToken(draftToken)}>{t('connection.apply')}</Button></FieldGroup></CollapsibleContent></Collapsible>
         <div className="flex flex-wrap items-center gap-3 mt-7"><button type="button" id="go" className="btn" disabled={!canRun} onClick={() => run(false)}>{busy ? t('action.busy') : t(isRetiming ? 'action.retime' : audioOnly ? 'action.generateAudio' : 'action.generate')}</button>{busy ? <Button id="stop" size="lg" variant="outline" disabled={stopping} onClick={stop}><SquareIcon data-icon="inline-start" />{stopping ? t('action.stopping') : t('action.stop')}</Button> : null}{comparison.length >= 2 ? <><Button id="compare" size="lg" variant="outline" disabled={!canRun} onClick={() => run(true)}>{t(isRetiming ? 'action.compareRetime' : 'action.compareGenerate')}</Button><span className="note">{t('action.compareNote', { a: 'Apple', b: t(reazonId === 'coreml' ? 'action.engineCoreml' : 'action.engineInt8') })}</span></> : null}</div>
       </Section>
