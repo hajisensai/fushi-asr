@@ -8,7 +8,7 @@ void main() {
       forceCoreMl: true, missingModel: MissingModelPolicy.fail);
     final result = expectLater(runner.run(
       audioPaths: ['/nonexistent-asr-close-test.wav'],
-      language: AsrLanguage.japanese), throwsStateError);
+      language: AsrLanguage.japanese, audioProfile: AsrAudioProfile.cleanSpeech), throwsStateError);
     await Future.wait([runner.close(), runner.close(), result]);
   }, skip: !Platform.isMacOS);
 
@@ -24,7 +24,7 @@ void main() {
       await expectLater(
           runner.run(
               audioPaths: ['/nonexistent-asr-test-$i.wav'],
-              language: AsrLanguage.japanese),
+              language: AsrLanguage.japanese, audioProfile: AsrAudioProfile.cleanSpeech),
           throwsA(isA<StateError>()));
     }
 
@@ -35,7 +35,7 @@ void main() {
     await last;
     await runner.close();
     await expectLater(
-        runner.run(audioPaths: [], language: AsrLanguage.japanese),
+        runner.run(audioPaths: [], language: AsrLanguage.japanese, audioProfile: AsrAudioProfile.cleanSpeech),
         throwsStateError);
   }, skip: !Platform.isMacOS);
 
@@ -45,7 +45,7 @@ void main() {
         forceCpu: true,
         forceCoreMl: true);
     await expectLater(
-        runner.run(audioPaths: [], language: AsrLanguage.japanese),
+        runner.run(audioPaths: [], language: AsrLanguage.japanese, audioProfile: AsrAudioProfile.cleanSpeech),
         throwsArgumentError);
     await runner.close();
   });

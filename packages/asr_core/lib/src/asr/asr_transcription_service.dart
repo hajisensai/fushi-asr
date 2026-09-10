@@ -32,9 +32,38 @@ import 'package:fushi_asr_core/src/onnx/model_file_downloader.dart';
 import 'package:fushi_asr_core/src/onnx/onnx_inference.dart';
 import 'package:fushi_asr_core/src/util/asr_paths.dart';
 
-/// 切段器种类：默认能量门限（零模型调用，见 `asr_vad.dart` 文件头的实测依据）；
-/// silero 作为带背景音乐/噪声音源的可选高质量路径。
-enum AsrSegmenterKind { energy, silero }
+/// 素材的声学属性：调用方对**自己的输入**作出的断言。
+///
+/// 这里刻意不是「选哪个 VAD 实现」——调用方不知道该选哪个，但它一定知道自己在
+/// 转什么。实现映射只发生在一处（切段器的构造点）。
+///
+/// **没有默认值是有意的。** 能量门限是一个带前提的性能优化，前提是「语音与背景
+/// 在能量上双模态可分」。这个前提以前是隐含的、没人检查的默认值，于是失效时
+/// 静默给出自信的错误答案：2026-09-10 在一集 Re:Zero（内封英文字幕作真值）上
+/// 实测，能量门限把 **89.3% 的片长**（219 段 / 1428.1 s）送进 ASR，其中
+/// **34.6%（493.7 s）落在任何对白之外**，**31 段（14.2%）整段没有一句对白**
+/// ——每一段都是一次幻听机会，而幻听出的 cue 会直接进字幕。让每个调用方显式
+/// 签字，才是这个前提唯一可靠的检查方式。
+enum AsrAudioProfile {
+  /// 干净朗读：语音与静默的能量差 30 dB 以上，构成清晰的双模态分布。
+  /// 有声书、录音棚 TTS、口述录音。
+  ///
+  /// 这是一个**断言**，不是偏好。选错的代价见 [mixedAudio]。
+  cleanSpeech,
+
+  /// 混音素材：动画、影视、任何带持续 BGM 或环境声的音源。
+  ///
+  /// 这类素材上能量门限不是「差一点」，是前提不成立，**调参数救不回来**：
+  /// 上述那一集的失败段实测电平分布 p10 −39.3 / p50 −27.3 / p90 −21.8 dBFS，
+  /// 整段挤在 17.5 dB 的窄带里，根本没有可供门限落脚的空谷；去掉
+  /// [EnergyVadScorer.maxThresholdDb] 的夹紧仍有 158/312 帧判语音，要压到
+  /// Silero 那 6/312 帧得把门限推到 −14.9 dBFS（≈本段峰值），代价是全片正常
+  /// 对白大面积漏掉。
+  ///
+  /// 代价已经付过：`silero_vad.onnx` 是每个语言包的必下文件，会话在引擎装载时
+  /// 无条件打开（跑能量门限时它也开着），零新依赖、零额外下载。
+  mixedAudio,
+}
 
 /// 开跑前的计划：哪个语言包、会用哪个编码器变体、期望落到哪个 EP、模型是否就绪。
 @immutable
@@ -63,16 +92,38 @@ class AsrTranscribePlan {
   /// （BUG-1163 同一条纪律）。
   final String? probeError;
 
-  bool get modelReady =>
-      modelStatus.ready && (alignmentModelStatus?.ready ?? true);
-  int get totalModelBytes =>
-      modelStatus.totalBytes + (alignmentModelStatus?.totalBytes ?? 0);
-  int get obtainedModelBytes =>
-      modelStatus.obtainedBytes + (alignmentModelStatus?.obtainedBytes ?? 0);
+  /// 能不能开始转录 —— **只看识别模型**。
+  ///
+  /// 调轴模型是增强（把时间轴从 VAD 边界改成声学定位），不是前置。以前它被算进
+  /// 这里，于是一个约 985 MB 的可选增强把约 150 MB 的核心功能整个挡住：选日语
+  /// 小模型会被要求先下 1B 调轴模型，删掉调轴模型后小模型直接不能选。可选的东西
+  /// 不该有否决权 —— 缺了就降级成不调轴（见 [alignmentReady]），不是不让转录。
+  bool get modelReady => modelStatus.ready;
+
+  /// 调轴模型是否就绪。false 时仍可转录，只是时间轴退回 VAD/发射时间。
+  ///
+  /// 识别模型本身就是字符级 CTC（Omnilingual）时不需要额外模型，这里恒 true。
+  bool get alignmentReady => alignmentModelStatus?.ready ?? true;
+
+  int get totalModelBytes => modelStatus.totalBytes;
+  int get obtainedModelBytes => modelStatus.obtainedBytes;
+
+  /// 开始转录还差多少字节 —— 不含调轴模型，界面上别把两者加在一起报给用户：
+  /// 那正是「小模型要下 1 GB」这个观感的来源。
   int get bytesToDownload => (totalModelBytes - obtainedModelBytes).clamp(
         0,
         totalModelBytes,
       );
+
+  /// 想要声学调轴还需要下载多少字节（已就绪或不需要时为 0）。
+  int get alignmentBytesToDownload {
+    final AsrModelStatus? status = alignmentModelStatus;
+    if (status == null || status.ready) return 0;
+    return (status.totalBytes - status.obtainedBytes).clamp(
+      0,
+      status.totalBytes,
+    );
+  }
 }
 
 /// 一次正在运行的转录。用完必须 [dispose] 释放 native 会话。
@@ -160,7 +211,7 @@ class AsrTranscriptionService {
     Future<Directory> Function()? jobsRoot,
     this.batchSize,
     this.chunkSeconds = 300,
-    this.segmenterKind = AsrSegmenterKind.energy,
+    required this.audioProfile,
     this.runInIsolate = true,
     this.usePipeline = true,
     this.useFp16Encoder = true,
@@ -207,7 +258,8 @@ class AsrTranscriptionService {
   /// （见 [AsrTranscribeJob.batchSize]）。
   final int? batchSize;
   final int chunkSeconds;
-  final AsrSegmenterKind segmenterKind;
+  /// 见 [AsrAudioProfile]：调用方对素材的断言，**没有默认值**。
+  final AsrAudioProfile audioProfile;
 
   /// 真转录是否下放后台 isolate（生产默认 true）。false 走进程内路径，注入的
   /// [AsrEngineLoader] / [AsrPcmSource] 只在该路径生效——闭包与 fake 会话过不了
@@ -309,12 +361,18 @@ class AsrTranscriptionService {
     );
   }
 
+  /// 下载识别模型；[includeAlignment] 为真时**再**下调轴模型。
+  ///
+  /// 默认不带调轴模型：它约 985 MB，而识别模型约 150 MB，把两者绑进同一个「下载
+  /// 模型」按钮，用户看到的就是「小模型要下 1 GB」。要调轴就显式要。
   Stream<ModelDownloadEvent> downloadModel({
     required AsrLanguage language,
     required AsrEncoderVariant variant,
+    bool includeAlignment = false,
   }) async* {
     final AsrModelStore store = await _openStore(language);
-    final bool needsAlignmentModel = alignGeneratedSubtitles &&
+    final bool needsAlignmentModel = includeAlignment &&
+        alignGeneratedSubtitles &&
         store.pack.architecture != AsrModelArchitecture.ctc;
     await for (final ModelDownloadEvent event in store.download(variant)) {
       if (!needsAlignmentModel || !event.done) yield event;
@@ -460,10 +518,21 @@ class AsrTranscriptionService {
   }) async {
     final AsrModelStore store = await _openStore(language);
     final Directory jobDir = await jobDirFor(audioPaths, language);
-    final AsrModelStore? alignmentStore = alignGeneratedSubtitles &&
+    AsrModelStore? alignmentStore = alignGeneratedSubtitles &&
             store.pack.architecture != AsrModelArchitecture.ctc
         ? await _openAlignmentStore()
         : null;
+    // 调轴模型没下：**降级成不调轴**，而不是拒绝转录或去载一个不存在的模型
+    // （后者会在装载时抛 AsrModelFileUnusableException，把「少一个可选增强」
+    // 变成「整趟转录失败」）。时间轴退回 VAD/发射时间，正文一个字不受影响。
+    if (alignmentStore != null &&
+        !(await alignmentStore.status(AsrEncoderVariant.int8)).ready) {
+      developer.log(
+        'ASR alignment model missing; transcribing without acoustic alignment',
+        name: kAsrLogName,
+      );
+      alignmentStore = null;
+    }
     // 素材总时长（探测失败的文件按未知处理）：决定装载时预热几个静态桶。
     final int? materialMs = await _probeMaterialMs(audioPaths);
     if (runInIsolate) {
@@ -478,7 +547,7 @@ class AsrTranscriptionService {
           audioPaths: List<String>.unmodifiable(audioPaths),
           jobDirPath: jobDir.path,
           chunkSeconds: chunkSeconds,
-          segmenterKind: segmenterKind,
+          audioProfile: audioProfile,
           batchSize: batchSize,
           usePipeline: usePipeline,
           useFp16Encoder: useFp16Encoder,
@@ -528,12 +597,15 @@ class AsrTranscriptionService {
         audioPaths: audioPaths,
         modelId: store.pack.id,
         pcm: _pcm,
-        segmenter: switch (segmenterKind) {
-          AsrSegmenterKind.energy => AsrVadSegmenter(
+        segmenter: switch (audioProfile) {
+          // 干净朗读：语音与静默双模态可分，纯 Dart 能量门限够用且免掉每窗口
+          // 一次 ONNX 前向（有声书上实测占整条流水线七成）。
+          AsrAudioProfile.cleanSpeech => AsrVadSegmenter(
               scorer: EnergyVadScorer(),
               maxSegmentMs: maxSegmentMs,
             ),
-          AsrSegmenterKind.silero => AsrVadSegmenter(
+          // 混音素材：能量门限的前提不成立，只能用神经网络 VAD。
+          AsrAudioProfile.mixedAudio => AsrVadSegmenter(
               session: sessions.vad,
               maxSegmentMs: maxSegmentMs,
             ),

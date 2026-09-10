@@ -79,6 +79,7 @@ class _CoreMlWorker {
   Future<TranscribeOutcome> run(
       List<String> paths,
       AsrLanguage language,
+      AsrAudioProfile audioProfile,
       SubtitleFormat format,
       void Function(TranscribeProgress)? progress,
       TranscribeCancellation? cancellation) async {
@@ -88,7 +89,8 @@ class _CoreMlWorker {
     final result = Completer<TranscribeOutcome>();
     _pending[id] = result;
     if (progress != null) _progress[id] = progress;
-    _port.send(_CoreMlRequest(id, List.of(paths), language, format));
+    _port.send(
+        _CoreMlRequest(id, List.of(paths), language, audioProfile, format));
     final detach = cancellation?.listen(() => _port.send(_CoreMlCancel(id)));
     try {
       return await result.future;
@@ -107,10 +109,15 @@ class _CoreMlWorker {
 }
 
 class _CoreMlRequest {
-  _CoreMlRequest(this.id, this.paths, this.language, this.format);
+  _CoreMlRequest(
+      this.id, this.paths, this.language, this.audioProfile, this.format);
   final int id;
   final List<String> paths;
   final AsrLanguage language;
+
+  /// 素材属性必须过 isolate 边界：根 isolate 的选择带不过来，漏了它 worker 侧
+  /// 就得自己编一个默认值——那正是这次要根除的东西。
+  final AsrAudioProfile audioProfile;
   final SubtitleFormat format;
 }
 
@@ -162,6 +169,7 @@ Future<void> _coreMlWorkerMain(
         final result = await runner._run(
             audioPaths: request.paths,
             language: request.language,
+            audioProfile: request.audioProfile,
             format: request.format,
             sessionFactory: cache,
             cancellation: cancellation,

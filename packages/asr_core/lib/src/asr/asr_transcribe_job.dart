@@ -106,6 +106,8 @@ class AsrTranscribeProgress {
     required this.segmentsDone,
     required this.elapsed,
     this.decodeStats,
+    this.unalignedSegments = 0,
+    this.estimatedBoundarySegments = 0,
   });
 
   /// 当前正在处理的文件下标（0 起）。
@@ -125,6 +127,18 @@ class AsrTranscribeProgress {
   /// 已解码的语音时长（毫秒，VAD 段之和）。
   final int speechMs;
   final int segmentsDone;
+
+  /// 声学调轴判定「对不齐」而被丢弃的段数（累计）。调轴未开启时恒为 0。
+  ///
+  /// 不为 0 不代表出错：多数是 VAD 把背景音乐当语音切出来、一遍解码对着它幻听
+  /// 的段。但它必须让用户看得见——静默丢字幕比丢得响更难查。
+  ///
+  /// 跨暂停累计：计数在恢复时从 [AsrJobFiles.rejected] 重建，不会归零。
+  final int unalignedSegments;
+
+  /// 含推定端点的段数（词表缺字压在 token 首/尾，那一端不是声学定位）。
+  /// 跨暂停累计：随段落一起落盘，恢复时重新求和。
+  final int estimatedBoundarySegments;
 
   /// 本次 run 起算的墙钟时间（不含此前暂停的会话）。
   final Duration elapsed;
@@ -156,12 +170,27 @@ class AsrTranscribeResult {
     required this.segmentCount,
     required this.totalMs,
     required this.fileDurationsMs,
+    this.unalignedSegments = 0,
+    this.estimatedBoundarySegments = 0,
+    this.rejectedPath,
   });
 
   final String srtPath;
   final String segmentsPath;
   final int cueCount;
   final int segmentCount;
+
+  /// 声学调轴判定对不齐、因而**没进字幕**的段数（跨暂停累计）。
+  ///
+  /// 大于 0 时这份字幕是缺段的，宿主必须告诉用户，别让「完成」盖住它。
+  final int unalignedSegments;
+
+  /// 含推定端点（词表缺字压在 token 首/尾）的段数：这些段的时间不是完整的
+  /// 声学对齐。
+  final int estimatedBoundarySegments;
+
+  /// 被拒段账本路径（[AsrJobFiles.rejected]）；逐条含位置与原因。
+  final String? rejectedPath;
   final int totalMs;
   final List<int> fileDurationsMs;
 }
@@ -283,6 +312,10 @@ class AsrJobState {
 abstract final class AsrJobFiles {
   static const String state = 'state.json';
   static const String segments = 'segments.jsonl';
+
+  /// 被声学调轴拒掉的段（[AsrRejectedSegment]）。与 [segments] 同一条恢复裁剪
+  /// 规则，恢复后计数从这里重建。
+  static const String rejected = 'rejected.jsonl';
   static const String srt = 'transcript.srt';
 
   /// 与 [srt] 同一份 cue 的逐 token 时间 sidecar（`serializeAsrCueTokens`）。
@@ -319,8 +352,16 @@ class AsrTranscribeJob {
   final AsrBatchDecoder decoder;
 
   /// Run a separate acoustic alignment before persisting a decoded segment.
-  /// A failed alignment aborts this batch; unaligned output is never committed.
-  final Future<AsrDecodedSegment> Function(
+  ///
+  /// 返回 null = 这一段对不齐（声学证据不足 / 可对齐正文太少）。**丢掉这一段，
+  /// 不要落盘，也不要炸掉整份转录**：VAD 会把纯 BGM 段当语音切出来，一遍解码
+  /// 对着音乐幻听出一两拍感叹词是常态，而调轴的 evidence 正是整条流水线上唯一
+  /// 能识破它的信号（一遍的贪心解码不产出置信度）。让这种常态抛异常，等于每
+  /// 撞上一段背景音乐就把整部片的转录结果全丢掉。
+  ///
+  /// 未对齐的输出仍然绝不落盘——丢弃，而不是退回一遍的时间戳。被丢的段连同
+  /// 位置与原因落 [AsrJobFiles.rejected]，恢复、最终结果与宿主提示都看得见。
+  final Future<AsrSegmentAlignment> Function(
     AsrSpeechSegment speech,
     AsrDecodedSegment transcript,
   )? alignSegment;
@@ -368,6 +409,7 @@ class AsrTranscribeJob {
 
   File get _stateFile => File(p.join(jobDir.path, AsrJobFiles.state));
   File get _segmentsFile => File(p.join(jobDir.path, AsrJobFiles.segments));
+  File get _rejectedFile => File(p.join(jobDir.path, AsrJobFiles.rejected));
   File get _srtFile => File(p.join(jobDir.path, AsrJobFiles.srt));
   File get _cueTokensFile => File(p.join(jobDir.path, AsrJobFiles.cueTokens));
 
@@ -433,6 +475,24 @@ class AsrTranscribeJob {
     return out;
   }
 
+  /// 读被声学调轴拒掉的段（缺失/半行按不存在处理，与 [loadSegments] 同纪律）。
+  static Future<List<AsrRejectedSegment>> loadRejected(Directory jobDir) async {
+    final File f = File(p.join(jobDir.path, AsrJobFiles.rejected));
+    if (!f.existsSync()) return <AsrRejectedSegment>[];
+    final List<AsrRejectedSegment> out = <AsrRejectedSegment>[];
+    for (final String line in await f.readAsLines()) {
+      if (line.trim().isEmpty) continue;
+      try {
+        out.add(
+          AsrRejectedSegment.fromJson(jsonDecode(line) as Map<String, Object?>),
+        );
+      } on FormatException {
+        continue;
+      }
+    }
+    return out;
+  }
+
   /// 运行（或从检查点继续）。流以 [AsrTranscribeFinishedEvent] 或
   /// [AsrTranscribePausedEvent] 结束；异常直接抛给监听者（已落盘的进度不丢）。
   Stream<AsrTranscribeEvent> run() async* {
@@ -452,6 +512,7 @@ class AsrTranscribeJob {
     if (loaded.fresh) {
       // 新任务（或状态文件缺失/损坏/路径不符）：清掉残留的旧产物。
       if (_segmentsFile.existsSync()) await _segmentsFile.delete();
+      if (_rejectedFile.existsSync()) await _rejectedFile.delete();
       if (_srtFile.existsSync()) await _srtFile.delete();
       if (_cueTokensFile.existsSync()) await _cueTokensFile.delete();
       await _writeState(state);
@@ -479,7 +540,21 @@ class AsrTranscribeJob {
       }
     }
     await _rewriteSegments(kept);
+    // 被拒段账本按同一条恢复点规则裁剪：恢复点之后的会被重跑，旧记录必须一起
+    // 作废，否则同一段会被记两次。
+    final List<AsrRejectedSegment> keptRejected = <AsrRejectedSegment>[];
+    for (final AsrRejectedSegment r in await loadRejected(jobDir)) {
+      final int resume = state.resumeSamples[r.audioFileIndex];
+      if (resume < 0 || r.startMs * kAsrSampleRate ~/ 1000 < resume) {
+        keptRejected.add(r);
+      }
+    }
+    await _rewriteRejected(keptRejected);
     int segmentsDone = kept.length;
+    int unalignedSegments = keptRejected.length;
+    int estimatedBoundarySegments = kept
+        .where((AsrTranscribedSegment s) => s.estimatedBoundaries > 0)
+        .length;
     int speechMs = kept.fold<int>(
       0,
       (int acc, AsrTranscribedSegment s) => acc + (s.endMs - s.startMs),
@@ -496,6 +571,8 @@ class AsrTranscribeJob {
         totalMs: totalMs,
         speechMs: speechMs,
         segmentsDone: segmentsDone,
+        unalignedSegments: unalignedSegments,
+        estimatedBoundarySegments: estimatedBoundarySegments,
         elapsed: clock.elapsed,
         decodeStats: statsProvider?.call(),
       );
@@ -573,22 +650,40 @@ class AsrTranscribeJob {
         List<AsrDecodedSegment> decoded,
       ) async {
         final List<AsrTranscribedSegment> out = <AsrTranscribedSegment>[];
+        final List<AsrRejectedSegment> rejects = <AsrRejectedSegment>[];
         for (int k = 0; k < batch.length; k++) {
           if (decoded[k].isEmpty) continue;
-          final AsrDecodedSegment aligned = alignSegment == null
-              ? decoded[k]
+          final AsrSegmentAlignment aligned = alignSegment == null
+              ? AsrSegmentAlignment.aligned(decoded[k])
               : await alignSegment!(batch[k], decoded[k]);
+          final AsrAlignmentRejection? rejection = aligned.rejection;
+          if (rejection != null) {
+            unalignedSegments++;
+            rejects.add(
+              AsrRejectedSegment(
+                audioFileIndex: fileIndex,
+                startMs: batch[k].startMs,
+                endMs: batch[k].endMs,
+                reason: rejection,
+                text: decoded[k].text,
+              ),
+            );
+            continue;
+          }
+          if (aligned.estimatedBoundaries > 0) estimatedBoundarySegments++;
           out.add(
             AsrTranscribedSegment.fromDecoded(
               audioFileIndex: fileIndex,
               speech: batch[k],
-              decoded: aligned,
+              decoded: aligned.segment!,
+              estimatedBoundaries: aligned.estimatedBoundaries,
             ),
           );
           speechMs += batch[k].lengthMs;
         }
         segmentsDone += out.length;
         await _appendSegments(out);
+        await _appendRejected(rejects);
       }
 
       /// 下一批该取哪些段（不移除）：静态桶按桶分组（见 [selectBucketBatch]），
@@ -766,6 +861,11 @@ class AsrTranscribeJob {
         segmentsPath: _segmentsFile.path,
         cueCount: cues.length,
         segmentCount: all.length,
+        unalignedSegments: (await loadRejected(jobDir)).length,
+        estimatedBoundarySegments: all
+            .where((AsrTranscribedSegment s) => s.estimatedBoundaries > 0)
+            .length,
+        rejectedPath: _rejectedFile.path,
         totalMs: fileDurationsMs.fold<int>(0, (int a, int b) => a + b),
         fileDurationsMs: fileDurationsMs,
       ),
@@ -845,6 +945,35 @@ class AsrTranscribeJob {
       mode: FileMode.append,
       flush: true,
     );
+  }
+
+  Future<void> _appendRejected(List<AsrRejectedSegment> rejected) async {
+    if (rejected.isEmpty) return;
+    final StringBuffer sb = StringBuffer();
+    for (final AsrRejectedSegment r in rejected) {
+      sb
+        ..write(jsonEncode(r.toJson()))
+        ..write('\n');
+    }
+    await _rejectedFile.writeAsString(
+      sb.toString(),
+      mode: FileMode.append,
+      flush: true,
+    );
+  }
+
+  Future<void> _rewriteRejected(List<AsrRejectedSegment> rejected) async {
+    if (rejected.isEmpty) {
+      if (_rejectedFile.existsSync()) await _rejectedFile.delete();
+      return;
+    }
+    final StringBuffer sb = StringBuffer();
+    for (final AsrRejectedSegment r in rejected) {
+      sb
+        ..write(jsonEncode(r.toJson()))
+        ..write('\n');
+    }
+    await _rejectedFile.writeAsString(sb.toString(), flush: true);
   }
 
   Future<void> _rewriteSegments(List<AsrTranscribedSegment> segments) async {

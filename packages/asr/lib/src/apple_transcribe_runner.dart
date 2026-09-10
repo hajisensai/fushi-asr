@@ -45,6 +45,8 @@ class AppleTranscribeRunner implements TranscribeService {
   Future<TranscribeOutcome> run({
     required List<String> audioPaths,
     required AsrLanguage language,
+    // 原生 Apple 引擎自己做端点检测，不经本仓的 VAD 切段：这里收下但不使用。
+    required AsrAudioProfile audioProfile,
     SubtitleFormat format = SubtitleFormat.srt,
     void Function(TranscribeProgress)? onProgress,
     TranscribeCancellation? cancellation,

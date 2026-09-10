@@ -23,6 +23,8 @@ class TranscribeProgress {
     this.processedMs = 0,
     this.totalMs = 0,
     this.detail = '',
+    this.unalignedSegments = 0,
+    this.estimatedBoundarySegments = 0,
   });
 
   /// `download` / `load` / `transcribe` / `done`。
@@ -30,6 +32,15 @@ class TranscribeProgress {
   final int processedMs;
   final int totalMs;
   final String detail;
+
+  /// 声学调轴判定对不齐、因而没进字幕的段数（跨暂停累计）。
+  ///
+  /// 必须一路透传到宿主：这份字幕缺了段，只有把它显示出来，用户才不会拿一份
+  /// 缺段的字幕当完整的用。
+  final int unalignedSegments;
+
+  /// 含推定端点（调轴词表缺字压在 token 首/尾）的段数：这些段不是完整声学对齐。
+  final int estimatedBoundarySegments;
 
   double get fraction => totalMs <= 0 ? 0 : (processedMs / totalMs).clamp(0, 1);
 
@@ -39,6 +50,9 @@ class TranscribeProgress {
         'totalMs': totalMs,
         'fraction': fraction,
         if (detail.isNotEmpty) 'detail': detail,
+        if (unalignedSegments > 0) 'unalignedSegments': unalignedSegments,
+        if (estimatedBoundarySegments > 0)
+          'estimatedBoundarySegments': estimatedBoundarySegments,
       };
 }
 
@@ -53,6 +67,8 @@ class TranscribeOutcome implements RetimingTranscription {
     this.decodeStats,
     required this.elapsed,
     required this.audioMs,
+    this.unalignedSegments = 0,
+    this.estimatedBoundarySegments = 0,
   });
 
   /// 按请求格式渲染好的字幕文本。
@@ -65,6 +81,14 @@ class TranscribeOutcome implements RetimingTranscription {
 
   /// Native engines do not have an ONNX execution provider.
   final String engine;
+
+  /// 声学调轴判定对不齐、没进这份字幕的段数。大于 0 时这份字幕是**缺段**的：
+  /// 宿主必须告诉用户，别让「完成」把它盖过去。
+  final int unalignedSegments;
+
+  /// 含推定端点的段数（调轴词表缺字压在 token 首/尾）。这些段的时间不是完整的
+  /// 声学对齐，试听复核时要优先看它们。
+  final int estimatedBoundarySegments;
   @override
   final List<AsrCueTokenTiming>? tokenTimings;
 
@@ -90,9 +114,13 @@ enum MissingModelPolicy {
 /// 前提下测服务端自己的行为（编码、错误路径、并发闸门），二来将来要接别的执行
 /// 后端也不用动服务端。
 abstract interface class TranscribeService {
+  /// [audioProfile] **没有默认值**：切段的前提由调用方声明，见
+  /// [AsrAudioProfile]。原生 Apple 引擎不做 VAD 切段，会忽略它，但接口不为此开
+  /// 口子——留一个可省略的参数，就等于把「忘了声明」重新变成合法写法。
   Future<TranscribeOutcome> run({
     required List<String> audioPaths,
     required AsrLanguage language,
+    required AsrAudioProfile audioProfile,
     SubtitleFormat format,
     void Function(TranscribeProgress progress)? onProgress,
     TranscribeCancellation? cancellation,
@@ -143,6 +171,7 @@ class TranscribeRunner implements TranscribeService {
   Future<TranscribeOutcome> run({
     required List<String> audioPaths,
     required AsrLanguage language,
+    required AsrAudioProfile audioProfile,
     SubtitleFormat format = SubtitleFormat.srt,
     void Function(TranscribeProgress progress)? onProgress,
     TranscribeCancellation? cancellation,
@@ -155,9 +184,11 @@ class TranscribeRunner implements TranscribeService {
     if (forceCoreMl && reuseCoreMlSessions && Platform.isMacOS) {
       final worker = await (_worker ??=
           _CoreMlWorker.spawn(registry, dataRoot, missingModel));
-      return worker.run(audioPaths, language, format, onProgress, cancellation);
+      return worker.run(
+          audioPaths, language, audioProfile, format, onProgress, cancellation);
     }
     return _run(
+      audioProfile: audioProfile,
         audioPaths: audioPaths,
         language: language,
         format: format,
@@ -168,6 +199,7 @@ class TranscribeRunner implements TranscribeService {
   Future<TranscribeOutcome> _run({
     required List<String> audioPaths,
     required AsrLanguage language,
+    required AsrAudioProfile audioProfile,
     required SubtitleFormat format,
     void Function(TranscribeProgress progress)? onProgress,
     OnnxSessionFactory? sessionFactory,
@@ -201,6 +233,7 @@ class TranscribeRunner implements TranscribeService {
     }
 
     final AsrTranscriptionService service = AsrTranscriptionService(
+      audioProfile: audioProfile,
       // managedRuntimeDir 是 per-isolate 静态字段，过不了边界：不把它显式
       // 送进去，推理 isolate 会重新解析候选并撞回系统目录里的旧 ORT。
       backend: AsrIsolateBackend(
@@ -296,6 +329,8 @@ class TranscribeRunner implements TranscribeService {
               phase: 'transcribe',
               processedMs: progress.processedMs,
               totalMs: progress.totalMs,
+              unalignedSegments: progress.unalignedSegments,
+              estimatedBoundarySegments: progress.estimatedBoundarySegments,
             ));
           case AsrTranscribePausedEvent():
             cancellation?.throwIfCancelled();
@@ -315,6 +350,8 @@ class TranscribeRunner implements TranscribeService {
         phase: 'done',
         processedMs: finished.totalMs,
         totalMs: finished.totalMs,
+        unalignedSegments: finished.unalignedSegments,
+        estimatedBoundarySegments: finished.estimatedBoundarySegments,
       ));
       return TranscribeOutcome(
         // srt 直接用产物原文，不经解析再渲染一遍：那样会把核心写出来的东西
@@ -329,6 +366,8 @@ class TranscribeRunner implements TranscribeService {
         decodeStats: running.decodeStats,
         elapsed: watch.elapsed,
         audioMs: finished.totalMs,
+        unalignedSegments: finished.unalignedSegments,
+        estimatedBoundarySegments: finished.estimatedBoundarySegments,
       );
     } finally {
       detach?.call();

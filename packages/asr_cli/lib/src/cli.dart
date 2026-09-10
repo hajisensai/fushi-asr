@@ -65,6 +65,11 @@ class TranscribeCommand extends Command<int> {
           defaultsTo: 'srt',
           allowed: <String>['srt', 'vtt', 'json'],
           help: '字幕格式')
+      ..addFlag('clean-speech',
+          help: '断言素材是干净朗读（有声书/口述）：语音与静默能量差 30 dB 以上，'
+              '走零模型调用的能量门限切段。默认按混音素材处理（动画/影视/任何带 '
+              'BGM 的音源），能量门限在那类素材上前提不成立。',
+          negatable: false)
       ..addFlag('cpu', help: '强制 CPU（不试 GPU EP）', negatable: false)
       ..addFlag('coreml', help: '使用 macOS CoreML（FP32 模型）', negatable: false)
       ..addFlag('no-download', help: '缺模型时报错而不是自动下载', negatable: false)
@@ -115,6 +120,11 @@ class TranscribeCommand extends Command<int> {
       return 2;
     }
 
+    // 默认按混音素材处理：能量门限是带前提的优化，前提由调用方显式断言。
+    final AsrAudioProfile audioProfile = argResults!['clean-speech'] as bool
+        ? AsrAudioProfile.cleanSpeech
+        : AsrAudioProfile.mixedAudio;
+
     final String text;
     if (serverUrl != null) {
       text = await _viaServer(serverUrl, paths.single, language, format, quiet);
@@ -132,6 +142,7 @@ class TranscribeCommand extends Command<int> {
       try {
         outcome = await runner.run(
           audioPaths: paths,
+          audioProfile: audioProfile,
           language: language,
           format: format,
           onProgress: quiet ? null : _printProgress,
