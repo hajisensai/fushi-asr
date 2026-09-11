@@ -203,8 +203,6 @@ class AsrCueBuilder {
 
   List<AsrCue> _buildForSegment(AsrTranscribedSegment seg, int offsetMs) {
     if (seg.tokens.isEmpty) return const <AsrCue>[];
-    final List<int>? alignedEnds = seg.tokenEndTimesMs;
-    if (alignedEnds != null) _validateAlignedTimes(seg, alignedEnds);
     final List<List<int>> sentences = _splitSentences(seg);
     final List<AsrCue> cues = <AsrCue>[];
     for (int s = 0; s < sentences.length; s++) {
@@ -213,25 +211,6 @@ class AsrCueBuilder {
       if (text.isEmpty || _punctOnly.hasMatch(text)) continue;
       final int firstTokenMs = seg.tokenTimesMs[idx.first];
       final int lastTokenMs = seg.tokenTimesMs[idx.last];
-      if (alignedEnds != null) {
-        final int end = alignedEnds[idx.last];
-        if (end <= firstTokenMs) {
-          throw StateError('Aligned subtitle text has no positive duration');
-        }
-        cues.add(AsrCue(
-          startMs: firstTokenMs + offsetMs,
-          endMs: end + offsetMs,
-          text: text,
-          audioFileIndex: seg.audioFileIndex,
-          tokens: List<String>.unmodifiable(
-            idx.map((int i) => seg.tokens[i]),
-          ),
-          tokenOffsetsMs: List<int>.unmodifiable(
-            idx.map((int i) => seg.tokenTimesMs[i] - firstTokenMs),
-          ),
-        ));
-        continue;
-      }
       final bool isFirst = s == 0;
       final bool isLast = s == sentences.length - 1;
 
@@ -270,24 +249,6 @@ class AsrCueBuilder {
     return cues;
   }
 
-  void _validateAlignedTimes(AsrTranscribedSegment seg, List<int> ends) {
-    if (ends.length != seg.tokens.length ||
-        seg.tokenTimesMs.length != seg.tokens.length) {
-      throw StateError('Aligned token timing length mismatch');
-    }
-    int previousEnd = seg.startMs;
-    for (int i = 0; i < ends.length; i++) {
-      final int start = seg.tokenTimesMs[i];
-      if (start < 0 ||
-          start < previousEnd ||
-          ends[i] < start ||
-          ends[i] > seg.endMs) {
-        throw StateError('Invalid aligned token interval at index $i');
-      }
-      previousEnd = ends[i];
-    }
-  }
-
   /// 返回每句包含的 token 下标列表（按序、互不重叠、覆盖全部 token）。
   List<List<int>> _splitSentences(AsrTranscribedSegment seg) {
     final List<List<int>> sentences = <List<int>>[];
@@ -297,9 +258,7 @@ class AsrCueBuilder {
       final String tok = seg.tokens[i];
       // 间隙切：与上一 token 距离过大，先封上一句。
       if (current.isNotEmpty &&
-          seg.tokenTimesMs[i] -
-                  (seg.tokenEndTimesMs ?? seg.tokenTimesMs)[current.last] >
-              gapSplitMs) {
+          seg.tokenTimesMs[i] - seg.tokenTimesMs[current.last] > gapSplitMs) {
         sentences.add(current);
         current = <int>[];
       }
@@ -337,8 +296,7 @@ class AsrCueBuilder {
     List<int> s,
     List<List<int>> out,
   ) {
-    final int span = (seg.tokenEndTimesMs ?? seg.tokenTimesMs)[s.last] -
-        seg.tokenTimesMs[s.first];
+    final int span = seg.tokenTimesMs[s.last] - seg.tokenTimesMs[s.first];
     if (span <= maxCueMs || s.length < 4) {
       out.add(s);
       return;
@@ -349,8 +307,7 @@ class AsrCueBuilder {
     int bestAt = -1;
     int bestGap = -1;
     for (int k = lo; k < hi && k + 1 < s.length; k++) {
-      final int gap = seg.tokenTimesMs[s[k + 1]] -
-          (seg.tokenEndTimesMs ?? seg.tokenTimesMs)[s[k]];
+      final int gap = seg.tokenTimesMs[s[k + 1]] - seg.tokenTimesMs[s[k]];
       if (gap > bestGap) {
         bestGap = gap;
         bestAt = k;

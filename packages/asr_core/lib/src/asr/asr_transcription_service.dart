@@ -18,8 +18,6 @@ import 'package:fushi_asr_core/src/asr/asr_cue_builder.dart'
     show AsrCueTokenTiming, parseAsrCueTokens;
 import 'package:fushi_asr_core/src/asr/asr_encoder_buckets.dart';
 import 'package:fushi_asr_core/src/asr/asr_engine.dart';
-import 'package:fushi_asr_core/src/asr/asr_ctc_decoder.dart';
-import 'package:fushi_asr_core/src/asr/asr_model_aligner.dart';
 import 'package:fushi_asr_core/src/asr/asr_model_manifest.dart';
 import 'package:fushi_asr_core/src/asr/asr_model_store.dart';
 import 'package:fushi_asr_core/src/asr/asr_pcm_source.dart';
@@ -74,7 +72,6 @@ class AsrTranscribePlan {
     required this.expectedProvider,
     required this.modelStatus,
     this.probeError,
-    this.alignmentModelStatus,
   });
 
   final AsrLanguage language;
@@ -83,7 +80,6 @@ class AsrTranscribePlan {
   /// 按平台策略与本机 EP 集合预期的编码器 EP（真正生效以运行期 resolution 为准）。
   final OnnxExecutionProvider expectedProvider;
   final AsrModelStatus modelStatus;
-  final AsrModelStatus? alignmentModelStatus;
 
   /// EP 探测本身抛错时的原因；null = 探测正常（含 cpuOnly 不探测）。
   ///
@@ -92,38 +88,17 @@ class AsrTranscribePlan {
   /// （BUG-1163 同一条纪律）。
   final String? probeError;
 
-  /// 能不能开始转录 —— **只看识别模型**。
-  ///
-  /// 调轴模型是增强（把时间轴从 VAD 边界改成声学定位），不是前置。以前它被算进
-  /// 这里，于是一个约 985 MB 的可选增强把约 150 MB 的核心功能整个挡住：选日语
-  /// 小模型会被要求先下 1B 调轴模型，删掉调轴模型后小模型直接不能选。可选的东西
-  /// 不该有否决权 —— 缺了就降级成不调轴（见 [alignmentReady]），不是不让转录。
+  /// 能不能开始转录 —— 只看识别模型。
   bool get modelReady => modelStatus.ready;
-
-  /// 调轴模型是否就绪。false 时仍可转录，只是时间轴退回 VAD/发射时间。
-  ///
-  /// 识别模型本身就是字符级 CTC（Omnilingual）时不需要额外模型，这里恒 true。
-  bool get alignmentReady => alignmentModelStatus?.ready ?? true;
 
   int get totalModelBytes => modelStatus.totalBytes;
   int get obtainedModelBytes => modelStatus.obtainedBytes;
 
-  /// 开始转录还差多少字节 —— 不含调轴模型，界面上别把两者加在一起报给用户：
-  /// 那正是「小模型要下 1 GB」这个观感的来源。
+  /// 开始转录还差多少字节。
   int get bytesToDownload => (totalModelBytes - obtainedModelBytes).clamp(
         0,
         totalModelBytes,
       );
-
-  /// 想要声学调轴还需要下载多少字节（已就绪或不需要时为 0）。
-  int get alignmentBytesToDownload {
-    final AsrModelStatus? status = alignmentModelStatus;
-    if (status == null || status.ready) return 0;
-    return (status.totalBytes - status.obtainedBytes).clamp(
-      0,
-      status.totalBytes,
-    );
-  }
 }
 
 /// 一次正在运行的转录。用完必须 [dispose] 释放 native 会话。
@@ -158,11 +133,9 @@ class AsrInProcessTranscription implements AsrRunningTranscription {
     required this.sessions,
     required this.job,
     AsrSegmentDecoder? decoder,
-    this.alignmentSessions,
   }) : _decoder = decoder;
 
   final AsrEngineSessions sessions;
-  final AsrEngineSessions? alignmentSessions;
   final AsrTranscribeJob job;
   final AsrSegmentDecoder? _decoder;
 
@@ -189,13 +162,7 @@ class AsrInProcessTranscription implements AsrRunningTranscription {
       job.requestPause(discardPending: discardPending);
 
   @override
-  Future<void> dispose() async {
-    try {
-      await alignmentSessions?.close();
-    } finally {
-      await sessions.close();
-    }
-  }
+  Future<void> dispose() => sessions.close();
 }
 
 /// 装配层。所有依赖可注入以便测试。
@@ -218,14 +185,11 @@ class AsrTranscriptionService {
     this.staticBucketsOverride,
     this.greedySessions,
     this.greedyIntraOpThreads,
-    this.alignGeneratedSubtitles = false,
-    Future<AsrModelStore> Function()? openAlignmentStore,
   })  : _backend = backend,
         _injectedLoader = loader,
         _pcm = pcm ?? FfmpegAsrPcmSource(),
         _openStore = openStore ?? AsrModelStore.open,
-        _jobsRoot = jobsRoot ?? _defaultJobsRoot,
-        _openAlignmentStore = openAlignmentStore ?? _defaultAlignmentStore;
+        _jobsRoot = jobsRoot ?? _defaultJobsRoot;
 
   final AsrIsolateBackend _backend;
 
@@ -245,13 +209,6 @@ class AsrTranscriptionService {
   final AsrPcmSource _pcm;
   final Future<AsrModelStore> Function(AsrLanguage language) _openStore;
   final Future<Directory> Function() _jobsRoot;
-  final Future<AsrModelStore> Function() _openAlignmentStore;
-
-  /// Preserve recognized text and rerun the audio through a CTC alignment model.
-  final bool alignGeneratedSubtitles;
-
-  static Future<AsrModelStore> _defaultAlignmentStore() =>
-      AsrModelStore.openPack(kAsrOmnilingualPack);
 
   /// 一次 encoder 前向的段数（动态 shape 路径）；null 时按编码器实际落到的 EP 取
   /// [defaultBatchSizeFor]。GPU 静态桶路径下一批行数由桶决定，本值不生效
@@ -353,33 +310,17 @@ class AsrTranscriptionService {
       variant: variant,
       expectedProvider: expected,
       modelStatus: await store.status(variant),
-      alignmentModelStatus: alignGeneratedSubtitles &&
-              store.pack.architecture != AsrModelArchitecture.ctc
-          ? await (await _openAlignmentStore()).status(AsrEncoderVariant.int8)
-          : null,
       probeError: probeError,
     );
   }
 
-  /// 下载识别模型；[includeAlignment] 为真时**再**下调轴模型。
-  ///
-  /// 默认不带调轴模型：它约 985 MB，而识别模型约 150 MB，把两者绑进同一个「下载
-  /// 模型」按钮，用户看到的就是「小模型要下 1 GB」。要调轴就显式要。
+  /// 下载识别模型。
   Stream<ModelDownloadEvent> downloadModel({
     required AsrLanguage language,
     required AsrEncoderVariant variant,
-    bool includeAlignment = false,
   }) async* {
     final AsrModelStore store = await _openStore(language);
-    final bool needsAlignmentModel = includeAlignment &&
-        alignGeneratedSubtitles &&
-        store.pack.architecture != AsrModelArchitecture.ctc;
-    await for (final ModelDownloadEvent event in store.download(variant)) {
-      if (!needsAlignmentModel || !event.done) yield event;
-    }
-    if (needsAlignmentModel) {
-      yield* (await _openAlignmentStore()).download(AsrEncoderVariant.int8);
-    }
+    yield* store.download(variant);
   }
 
   /// 任务目录：文件名 + 字节数 + 模型包 id 的 SHA-1。
@@ -389,8 +330,7 @@ class AsrTranscriptionService {
   ) async {
     final Directory root = await _jobsRoot();
     final String id = jobIdFor(audioPaths, language);
-    return Directory(
-        p.join(root.path, alignGeneratedSubtitles ? '$id-ctc-aligned-v1' : id));
+    return Directory(p.join(root.path, id));
   }
 
   /// 纯函数：由文件名、字节数与模型包 id 派生稳定 id（文件不存在按 0 字节计）。
@@ -518,21 +458,6 @@ class AsrTranscriptionService {
   }) async {
     final AsrModelStore store = await _openStore(language);
     final Directory jobDir = await jobDirFor(audioPaths, language);
-    AsrModelStore? alignmentStore = alignGeneratedSubtitles &&
-            store.pack.architecture != AsrModelArchitecture.ctc
-        ? await _openAlignmentStore()
-        : null;
-    // 调轴模型没下：**降级成不调轴**，而不是拒绝转录或去载一个不存在的模型
-    // （后者会在装载时抛 AsrModelFileUnusableException，把「少一个可选增强」
-    // 变成「整趟转录失败」）。时间轴退回 VAD/发射时间，正文一个字不受影响。
-    if (alignmentStore != null &&
-        !(await alignmentStore.status(AsrEncoderVariant.int8)).ready) {
-      developer.log(
-        'ASR alignment model missing; transcribing without acoustic alignment',
-        name: kAsrLogName,
-      );
-      alignmentStore = null;
-    }
     // 素材总时长（探测失败的文件按未知处理）：决定装载时预热几个静态桶。
     final int? materialMs = await _probeMaterialMs(audioPaths);
     if (runInIsolate) {
@@ -555,8 +480,6 @@ class AsrTranscriptionService {
           materialMs: materialMs,
           greedySessions: greedySessions,
           greedyIntraOpThreads: greedyIntraOpThreads,
-          alignmentStoreDirPath: alignmentStore?.dir.path,
-          alignGeneratedSubtitles: alignGeneratedSubtitles,
         ),
       );
     }
@@ -571,26 +494,8 @@ class AsrTranscriptionService {
       greedyIntraOpThreads:
           greedyIntraOpThreads ?? kAsrGreedyGraphIntraOpThreads,
     );
-    AsrEngineSessions? alignmentSessions;
     try {
-      if (alignmentStore != null) {
-        alignmentSessions = await _loader.load(
-          store: alignmentStore,
-          variant: AsrEncoderVariant.int8,
-          preference: AsrAccelerationPreference.cpuOnly,
-          useStaticEncoderBuckets: false,
-          useFp16Encoder: false,
-        );
-      }
       final AsrSegmentDecoder decoder = sessions.newDecoder()..warmUp();
-      final AsrEngineSessions? alignmentEngine =
-          alignmentSessions ?? (alignGeneratedSubtitles ? sessions : null);
-      final AsrModelAligner? aligner = alignmentEngine == null
-          ? null
-          : AsrModelAligner(
-              decoder: alignmentEngine.newDecoder() as AsrCtcDecoder,
-              tokens: alignmentEngine.tokens,
-            );
       final int maxSegmentMs = sessions.maxSegmentMs;
       final AsrTranscribeJob job = AsrTranscribeJob(
         jobDir: jobDir,
@@ -611,7 +516,6 @@ class AsrTranscriptionService {
             ),
         },
         decoder: decoder,
-        alignSegment: aligner?.align,
         batchSize: batchSize ??
             defaultBatchSizeFor(sessions.encoderResolution.effective),
         chunkSeconds: chunkSeconds,
@@ -622,14 +526,9 @@ class AsrTranscriptionService {
         sessions: sessions,
         job: job,
         decoder: decoder,
-        alignmentSessions: alignmentSessions,
       );
     } catch (_) {
-      try {
-        await alignmentSessions?.close();
-      } finally {
-        await sessions.close();
-      }
+      await sessions.close();
       rethrow;
     }
   }

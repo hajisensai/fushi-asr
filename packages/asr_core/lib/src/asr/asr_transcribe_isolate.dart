@@ -35,8 +35,6 @@ import 'package:fushi_asr_core/src/asr/asr_model_store.dart';
 import 'package:fushi_asr_core/src/asr/asr_pcm_bridge.dart';
 import 'package:fushi_asr_core/src/asr/asr_transcribe_job.dart';
 import 'package:fushi_asr_core/src/asr/asr_transcription_service.dart';
-import 'package:fushi_asr_core/src/asr/asr_ctc_decoder.dart';
-import 'package:fushi_asr_core/src/asr/asr_model_aligner.dart';
 import 'package:fushi_asr_core/src/asr/asr_transducer_decoder.dart';
 import 'package:fushi_asr_core/src/asr/asr_types.dart';
 import 'package:fushi_asr_core/src/util/log.dart';
@@ -62,8 +60,6 @@ class AsrIsolateJobSpec {
     this.materialMs,
     this.greedySessions,
     this.greedyIntraOpThreads,
-    this.alignmentStoreDirPath,
-    this.alignGeneratedSubtitles = false,
   });
 
   /// 见 [AsrTranscriptionService.greedySessions] / `greedyIntraOpThreads`。
@@ -71,8 +67,6 @@ class AsrIsolateJobSpec {
   final int? greedyIntraOpThreads;
 
   final String storeDirPath;
-  final String? alignmentStoreDirPath;
-  final bool alignGeneratedSubtitles;
   final AsrLanguage language;
   final AsrEncoderVariant variant;
   final AsrAccelerationPreference preference;
@@ -398,7 +392,6 @@ Future<void> _isolateMain(_IsolateArgs args) async {
   // PCM 解码在根 isolate（ffmpeg_kit 的 EventChannel 只能在那边订阅，BUG-2197）。
   final RemoteAsrPcmSource pcm = RemoteAsrPcmSource(args.pcmPort);
   AsrEngineSessions? sessions;
-  AsrEngineSessions? alignmentSessions;
   try {
     final AsrModelStore store = AsrModelStore(
       Directory(spec.storeDirPath),
@@ -418,16 +411,6 @@ Future<void> _isolateMain(_IsolateArgs args) async {
       greedyIntraOpThreads:
           spec.greedyIntraOpThreads ?? kAsrGreedyGraphIntraOpThreads,
     );
-    final String? alignmentPath = spec.alignmentStoreDirPath;
-    if (alignmentPath != null) {
-      alignmentSessions = await loader.load(
-        store: AsrModelStore(Directory(alignmentPath), kAsrOmnilingualPack),
-        variant: AsrEncoderVariant.int8,
-        preference: AsrAccelerationPreference.cpuOnly,
-        useStaticEncoderBuckets: false,
-        useFp16Encoder: false,
-      );
-    }
     args.events.send(
       _LoadedMessage(
         resolution: sessions.encoderResolution,
@@ -437,14 +420,6 @@ Future<void> _isolateMain(_IsolateArgs args) async {
       ),
     );
     final AsrSegmentDecoder decoder = sessions.newDecoder()..warmUp();
-    final AsrEngineSessions? alignmentEngine =
-        alignmentSessions ?? (spec.alignGeneratedSubtitles ? sessions : null);
-    final AsrModelAligner? aligner = alignmentEngine == null
-        ? null
-        : AsrModelAligner(
-            decoder: alignmentEngine.newDecoder() as AsrCtcDecoder,
-            tokens: alignmentEngine.tokens,
-          );
     final int maxSegmentMs = sessions.maxSegmentMs;
     final AsrTranscribeJob j = AsrTranscribeJob(
       jobDir: Directory(spec.jobDirPath),
@@ -465,7 +440,6 @@ Future<void> _isolateMain(_IsolateArgs args) async {
             ),
         },
       decoder: decoder,
-      alignSegment: aligner?.align,
       batchSize: spec.batchSize ??
           AsrTranscriptionService.defaultBatchSizeFor(
             sessions.encoderResolution.effective,
@@ -488,11 +462,7 @@ Future<void> _isolateMain(_IsolateArgs args) async {
   } finally {
     asrShutdownTrace('isolate: closing sessions');
     try {
-      try {
-        await alignmentSessions?.close();
-      } finally {
-        await sessions?.close();
-      }
+      await sessions?.close();
     } catch (_) {
       // 关会话失败没有可做的补救；退出本 isolate 即可。
     }
