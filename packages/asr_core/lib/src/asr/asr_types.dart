@@ -245,78 +245,13 @@ class AsrSpeechSegment {
   int get lengthMs => samples.length * 1000 ~/ kAsrSampleRate;
 }
 
-/// 声学调轴判定整段不可对齐的原因。
-///
-/// 要落进任务目录的被拒段账本（`rejected.jsonl`）并一路带到最终结果：丢了段却
-/// 报「正常完成」，等于把静默丢段换个地方继续静默。
-enum AsrAlignmentRejection {
-  /// 证据比在整个词表上均匀瞎猜还差：这段音频根本没在说这段正文。多半是 VAD
-  /// 把背景音乐当语音切了出来，一遍解码对着它幻听出一两拍感叹词。
-  noAcousticEvidence,
-
-  /// 建不出有效的 Viterbi 路径：音频帧不足 / 对齐预算超限 / 路径概率下溢。
-  noViterbiPath,
-
-  /// 正文里能进声学路径的字符太少（调轴词表缺字过多），无从度量。
-  tooFewMappableCharacters;
-
-  /// 账本里的稳定字面量（枚举顺序变化不得改变已落盘记录的含义）。
-  String get wireName => switch (this) {
-        AsrAlignmentRejection.noAcousticEvidence => 'no-acoustic-evidence',
-        AsrAlignmentRejection.noViterbiPath => 'no-viterbi-path',
-        AsrAlignmentRejection.tooFewMappableCharacters =>
-          'too-few-mappable-characters',
-      };
-
-  static AsrAlignmentRejection? fromWireName(String name) {
-    for (final AsrAlignmentRejection r in AsrAlignmentRejection.values) {
-      if (r.wireName == name) return r;
-    }
-    return null;
-  }
-}
-
-/// 一次声学调轴的结果：对齐好的段，或整段被拒。
-@immutable
-class AsrSegmentAlignment {
-  const AsrSegmentAlignment.aligned(
-    AsrDecodedSegment this.segment, {
-    this.estimatedBoundaries = 0,
-  })  : rejection = null,
-        assert(estimatedBoundaries >= 0);
-
-  const AsrSegmentAlignment.rejected(AsrAlignmentRejection this.rejection)
-      : segment = null,
-        estimatedBoundaries = 0;
-
-  /// 对齐好的段；[rejection] 非空时为 null。
-  final AsrDecodedSegment? segment;
-
-  /// 整段不可对齐的原因；对齐成功时为 null。
-  final AsrAlignmentRejection? rejection;
-
-  /// 端点由相邻锚点**推定**（而非声学定位）的 token 数。
-  ///
-  /// 大于 0 就**不是完整的声学对齐**：正文里有调轴词表外的字符压在某个 token 的
-  /// 首或尾，那一端的真实时刻定不下来。缺字不是标点——标点真的不发声，缺字发声
-  /// 却查不到 token，拿同一个 token 里已知字的时刻去当边界会让字幕晚出现或早
-  /// 消失。推定值一律用相邻锚点兜住（宁可早出，不许把字音切掉），并在这里如实
-  /// 计数，别让它冒充声学对齐。
-  final int estimatedBoundaries;
-
-  bool get isRejected => rejection != null;
-}
-
 /// 一段语音的解码结果：字符 token 与各自的**段内**时间（毫秒，相对段起点）。
 @immutable
 class AsrDecodedSegment {
   const AsrDecodedSegment({
     required this.tokens,
     required this.tokenOffsetsMs,
-    this.tokenEndOffsetsMs,
-  })  : assert(tokens.length == tokenOffsetsMs.length),
-        assert(tokenEndOffsetsMs == null ||
-            tokens.length == tokenEndOffsetsMs.length);
+  }) : assert(tokens.length == tokenOffsetsMs.length);
 
   // 注：const 构造里的 assert 不能对 const 列表取 length，故这里只能是 final。
   static final AsrDecodedSegment empty = AsrDecodedSegment(
@@ -342,10 +277,6 @@ class AsrDecodedSegment {
   final List<String> tokens;
   final List<int> tokenOffsetsMs;
 
-  /// 二次模型对齐后的 token 结束时间；null 表示旧的发射时间结果。
-  /// 标点等无声 token 可以是零时长。
-  final List<int>? tokenEndOffsetsMs;
-
   String get text => tokens.join();
   bool get isEmpty => tokens.isEmpty;
 }
@@ -359,21 +290,14 @@ class AsrTranscribedSegment {
     required this.endMs,
     required this.tokens,
     required this.tokenTimesMs,
-    this.tokenEndTimesMs,
-    this.estimatedBoundaries = 0,
-  })  : assert(tokens.length == tokenTimesMs.length),
-        assert(estimatedBoundaries >= 0),
-        assert(
-            tokenEndTimesMs == null || tokens.length == tokenEndTimesMs.length);
+  }) : assert(tokens.length == tokenTimesMs.length);
 
   factory AsrTranscribedSegment.fromDecoded({
     required int audioFileIndex,
     required AsrSpeechSegment speech,
     required AsrDecodedSegment decoded,
-    int estimatedBoundaries = 0,
   }) {
     return AsrTranscribedSegment(
-      estimatedBoundaries: estimatedBoundaries,
       audioFileIndex: audioFileIndex,
       startMs: speech.startMs,
       endMs: speech.endMs,
@@ -381,11 +305,6 @@ class AsrTranscribedSegment {
       tokenTimesMs: List<int>.unmodifiable(
         decoded.tokenOffsetsMs.map((int o) => speech.startMs + o),
       ),
-      tokenEndTimesMs: decoded.tokenEndOffsetsMs == null
-          ? null
-          : List<int>.unmodifiable(
-              decoded.tokenEndOffsetsMs!.map((int o) => speech.startMs + o),
-            ),
     );
   }
 
@@ -400,15 +319,8 @@ class AsrTranscribedSegment {
       tokenTimesMs: List<int>.unmodifiable(
         (json['m'] as List<Object?>).map((Object? v) => (v as num).toInt()),
       ),
-      tokenEndTimesMs: json['me'] == null
-          ? null
-          : List<int>.unmodifiable(
-              (json['me'] as List<Object?>)
-                  .map((Object? v) => (v as num).toInt()),
-            ),
-      // 旧检查点没有这个键：按 0 读，等于「全是声学定位」——旧任务本来就没有
-      // 缺字推定这回事，不能凭空给它记账。
-      estimatedBoundaries: json['eb'] == null ? 0 : (json['eb'] as num).toInt(),
+      // 旧检查点可能还带 `me` / `eb`（已删除的声学调轴产物）：只读自己认的键，
+      // 多出来的一律忽略，旧任务照样能恢复。
     );
   }
 
@@ -423,15 +335,6 @@ class AsrTranscribedSegment {
   /// 每个 token 的发射时间（毫秒，相对该音频文件）。
   final List<int> tokenTimesMs;
 
-  /// 二次模型对齐的结束时间（相对音频文件），与 [tokenTimesMs] 等长。
-  /// null 保持旧任务的 RNN-T/VAD 定轴行为。
-  final List<int>? tokenEndTimesMs;
-
-  /// 端点由相邻锚点推定而非声学定位的 token 数（见
-  /// [AsrSegmentAlignment.estimatedBoundaries]）。跟着段一起落盘，暂停恢复后
-  /// 计数才不会归零——这段不会重跑，账丢了就永远补不回来。
-  final int estimatedBoundaries;
-
   String get text => tokens.join();
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -440,58 +343,6 @@ class AsrTranscribedSegment {
         'e': endMs,
         't': tokens,
         'm': tokenTimesMs,
-        if (tokenEndTimesMs != null) 'me': tokenEndTimesMs,
-        if (estimatedBoundaries > 0) 'eb': estimatedBoundaries,
-      };
-}
-
-/// 被声学调轴拒掉的一段：位置、原因、当时识别出的正文。
-///
-/// 与 [AsrTranscribedSegment] 同形、同一条恢复裁剪规则，落 `rejected.jsonl`。
-/// **必须落盘**：被拒的段恢复后不会重跑，只记在内存里，一暂停计数就归零，于是
-/// 「字幕缺了段」和「正常完成」同时成立——那正是这套记账要消灭的东西。
-@immutable
-class AsrRejectedSegment {
-  const AsrRejectedSegment({
-    required this.audioFileIndex,
-    required this.startMs,
-    required this.endMs,
-    required this.reason,
-    required this.text,
-  });
-
-  factory AsrRejectedSegment.fromJson(Map<String, Object?> json) {
-    final AsrAlignmentRejection? reason = AsrAlignmentRejection.fromWireName(
-      json['r'] as String,
-    );
-    if (reason == null) {
-      // 未知原因字面量（更新过的产物被旧版读到）：当半行处理，交给调用方丢弃，
-      // 不要静默塞一个「其它」进去把统计做实。
-      throw const FormatException('未知的调轴拒绝原因');
-    }
-    return AsrRejectedSegment(
-      audioFileIndex: (json['f'] as num).toInt(),
-      startMs: (json['s'] as num).toInt(),
-      endMs: (json['e'] as num).toInt(),
-      reason: reason,
-      text: json['x'] as String? ?? '',
-    );
-  }
-
-  final int audioFileIndex;
-  final int startMs;
-  final int endMs;
-  final AsrAlignmentRejection reason;
-
-  /// 一遍解码出的正文。留着是为了让用户能判断「丢掉的是不是真对白」。
-  final String text;
-
-  Map<String, Object?> toJson() => <String, Object?>{
-        'f': audioFileIndex,
-        's': startMs,
-        'e': endMs,
-        'r': reason.wireName,
-        if (text.isNotEmpty) 'x': text,
       };
 }
 

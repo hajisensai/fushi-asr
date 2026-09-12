@@ -599,10 +599,6 @@ class AsrServer {
             },
           // 缺段/推定端点必须随结果一起出去：客户端只看 `result` 行，不报就等于
           // 让用户拿一份缺段的字幕当完整的用。
-          if (outcome.unalignedSegments > 0)
-            'unalignedSegments': outcome.unalignedSegments,
-          if (outcome.estimatedBoundarySegments > 0)
-            'estimatedBoundarySegments': outcome.estimatedBoundarySegments,
           'provider': outcome.providerLabel,
           'fellBack': outcome.provider?.didFallBack ?? false,
           'engine': backend?.id ?? 'default',

@@ -69,44 +69,6 @@ void main() {
       );
 
   group('plan：EP 探测失败不吞（A5）', () {
-    test('second pass includes aligner download and isolates old cached jobs',
-        () async {
-      final AsrTranscriptionService aligned = AsrTranscriptionService(
-      audioProfile: AsrAudioProfile.cleanSpeech,
-        backend: const AsrIsolateBackend(buildFactory: _unusedFactory),
-        loader: AsrEngineLoader(factory: _ProbeFactory()),
-        openStore: (AsrLanguage l) async =>
-            AsrModelStore(tmp, asrModelPackFor(l)),
-        openAlignmentStore: () async => AsrModelStore(
-            Directory(p.join(tmp.path, 'aligner')), kAsrOmnilingualPack),
-        jobsRoot: () async => tmp,
-        alignGeneratedSubtitles: true,
-      );
-      final AsrTranscribePlan plan = await aligned.plan(
-        language: AsrLanguage.japanese,
-        preference: AsrAccelerationPreference.cpuOnly,
-      );
-      expect(plan.alignmentModelStatus, isNotNull);
-      // 调轴模型是增强不是前置：它没下也照样能开始转录，只是时间轴退回 VAD/
-      // 发射时间。以前它被算进 modelReady，于是 985 MB 的可选增强把 150 MB 的
-      // 核心功能整个挡住（「选日语小模型提示要下 1 GB」）。
-      expect(plan.modelReady, isFalse, reason: '识别模型本身也没下');
-      expect(plan.alignmentReady, isFalse);
-      // 报给用户的「还要下多少」只含识别模型，不把调轴模型加进去。
-      expect(plan.totalModelBytes, plan.modelStatus.totalBytes);
-      expect(plan.bytesToDownload, plan.modelStatus.totalBytes);
-      expect(plan.alignmentBytesToDownload,
-          kAsrOmnilingualPack.totalBytes(AsrEncoderVariant.int8));
-      expect(plan.bytesToDownload,
-          lessThan(plan.alignmentBytesToDownload),
-          reason: '识别模型远小于调轴模型，两者不能合并成一个数字报给用户');
-      final Directory originalDir = await service(_ProbeFactory())
-          .jobDirFor(<String>['a.mp3'], AsrLanguage.japanese);
-      final Directory alignedDir =
-          await aligned.jobDirFor(<String>['a.mp3'], AsrLanguage.japanese);
-      expect(alignedDir.path, isNot(originalDir.path));
-      expect(alignedDir.path, endsWith('-ctc-aligned-v1'));
-    });
     test('探测抛错 → 按 CPU 推荐 int8，且 probeError 带原因', () async {
       final _ProbeFactory factory = _ProbeFactory(
         error: StateError('DirectML.dll not found'),
