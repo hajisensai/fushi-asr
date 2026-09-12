@@ -7,8 +7,8 @@ Reconnaissance vocale multilingue qui produit des sous-titres. **Un cœur en Dar
 backend ONNX interchangeable**, qui s'exécute côté serveur et se pilote depuis la CLI ou depuis
 l'interface web intégrée.
 
-Extrait de [Hibiki / Fushi](https://github.com/hajisensai/Fushi) vers un dépôt autonome
-(`hajisensai/fushi-subtitles`), dont Hibiki dépend désormais. L'exécutable en ligne de commande
+Extrait de [Fushi](https://github.com/hajisensai/Fushi) vers un dépôt autonome
+(`hajisensai/fushi-subtitles`), dont Fushi dépend désormais. L'exécutable en ligne de commande
 s'appelle `fushi-subs`.
 
 ## Ce qu'il fait

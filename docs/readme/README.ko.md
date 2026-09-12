@@ -6,8 +6,8 @@
 자막을 생성하는 다국어 음성 인식 엔진. **순수 Dart 코어와 교체 가능한 ONNX 백엔드**로 이루어져 있으며,
 서버 사이드에서 동작하고 CLI 또는 내장 웹 UI로 조작합니다.
 
-[Hibiki / Fushi](https://github.com/hajisensai/Fushi)에서 독립 저장소(`hajisensai/fushi-subtitles`)로
-분리한 프로젝트이며, Hibiki가 다시 이 저장소를 의존성으로 사용합니다. 명령줄 실행 파일 이름은
+[Fushi](https://github.com/hajisensai/Fushi)에서 독립 저장소(`hajisensai/fushi-subtitles`)로
+분리한 프로젝트이며, Fushi가 다시 이 저장소를 의존성으로 사용합니다. 명령줄 실행 파일 이름은
 `fushi-subs`입니다.
 
 ## 무엇을 하는가

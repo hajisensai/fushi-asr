@@ -7,8 +7,8 @@ Reconhecimento de fala multilíngue que gera legendas. **Um núcleo em Dart puro
 plugável**, executado no servidor e controlado pela linha de comando ou pela interface web
 embutida.
 
-Extraído do [Hibiki / Fushi](https://github.com/hajisensai/Fushi) para um repositório independente
-(`hajisensai/fushi-subtitles`), do qual o Hibiki passou a depender. O executável de linha de comando
+Extraído do [Fushi](https://github.com/hajisensai/Fushi) para um repositório independente
+(`hajisensai/fushi-subtitles`), do qual o Fushi passou a depender. O executável de linha de comando
 se chama `fushi-subs`.
 
 ## O que ele faz

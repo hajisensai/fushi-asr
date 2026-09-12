@@ -6,8 +6,8 @@
 Mehrsprachige Spracherkennung, die Untertitel erzeugt. **Ein reiner Dart-Kern mit austauschbarem
 ONNX-Backend**, der serverseitig läuft und über die CLI oder die mitgelieferte Web-UI gesteuert wird.
 
-Aus [Hibiki / Fushi](https://github.com/hajisensai/Fushi) in ein eigenständiges Repository
-(`hajisensai/fushi-subtitles`) ausgelagert, das Hibiki seinerseits als Abhängigkeit einbindet. Die
+Aus [Fushi](https://github.com/hajisensai/Fushi) in ein eigenständiges Repository
+(`hajisensai/fushi-subtitles`) ausgelagert, das Fushi seinerseits als Abhängigkeit einbindet. Die
 ausführbare Datei für die Kommandozeile heißt `fushi-subs`.
 
 ## Funktionsumfang

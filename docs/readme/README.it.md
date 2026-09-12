@@ -7,8 +7,8 @@ Riconoscimento vocale multilingue che produce sottotitoli. **Un core interamente
 backend ONNX intercambiabile**, che gira lato server e si pilota da riga di comando o dalla web UI
 integrata.
 
-Estratto da [Hibiki / Fushi](https://github.com/hajisensai/Fushi) in un repository autonomo
-(`hajisensai/fushi-subtitles`), da cui Hibiki poi dipende. L'eseguibile da riga di comando si chiama
+Estratto da [Fushi](https://github.com/hajisensai/Fushi) in un repository autonomo
+(`hajisensai/fushi-subtitles`), da cui Fushi poi dipende. L'eseguibile da riga di comando si chiama
 `fushi-subs`.
 
 ## Cosa fa

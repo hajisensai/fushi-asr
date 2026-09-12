@@ -7,8 +7,8 @@ Pengenalan suara multibahasa yang menghasilkan takarir. **Inti murni Dart dengan
 dapat dipasang-lepas**, berjalan di sisi server dan dikendalikan lewat CLI atau antarmuka web
 bawaan.
 
-Dipisahkan dari [Hibiki / Fushi](https://github.com/hajisensai/Fushi) menjadi repositori mandiri
-(`hajisensai/fushi-subtitles`), yang kemudian menjadi dependensi Hibiki. Executable baris
+Dipisahkan dari [Fushi](https://github.com/hajisensai/Fushi) menjadi repositori mandiri
+(`hajisensai/fushi-subtitles`), yang kemudian menjadi dependensi Fushi. Executable baris
 perintahnya bernama `fushi-subs`.
 
 ## Apa yang dilakukannya

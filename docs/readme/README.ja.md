@@ -6,8 +6,8 @@
 字幕を生成する多言語音声認識エンジン。**純粋な Dart のコアと差し替え可能な ONNX バックエンド**で構成され、
 サーバーサイドで動作し、CLI または同梱の Web UI から操作します。
 
-[Hibiki / Fushi](https://github.com/hajisensai/Fushi) から独立したリポジトリ（`hajisensai/fushi-subtitles`）
-として切り出したもので、Hibiki 側がこれを依存関係として利用します。コマンドライン実行ファイル名は
+[Fushi](https://github.com/hajisensai/Fushi) から独立したリポジトリ（`hajisensai/fushi-subtitles`）
+として切り出したもので、Fushi 側がこれを依存関係として利用します。コマンドライン実行ファイル名は
 `fushi-subs` です。
 
 ## 何ができるか

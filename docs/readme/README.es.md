@@ -7,8 +7,8 @@ Reconocimiento de voz multilingüe que genera subtítulos. **Un núcleo escrito 
 un backend ONNX intercambiable**, que se ejecuta en el servidor y se controla desde la CLI o desde la
 interfaz web incorporada.
 
-Extraído de [Hibiki / Fushi](https://github.com/hajisensai/Fushi) a un repositorio independiente
-(`hajisensai/fushi-subtitles`), del que Hibiki pasa a depender. El ejecutable de línea de comandos se
+Extraído de [Fushi](https://github.com/hajisensai/Fushi) a un repositorio independiente
+(`hajisensai/fushi-subtitles`), del que Fushi pasa a depender. El ejecutable de línea de comandos se
 llama `fushi-subs`.
 
 ## Qué hace

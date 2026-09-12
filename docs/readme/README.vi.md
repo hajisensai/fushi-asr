@@ -6,8 +6,8 @@
 Nhận dạng giọng nói đa ngôn ngữ, đầu ra là phụ đề. **Một lõi thuần Dart với backend ONNX có thể thay
 thế**, chạy phía máy chủ và được điều khiển từ CLI hoặc giao diện web tích hợp sẵn.
 
-Được tách ra từ [Hibiki / Fushi](https://github.com/hajisensai/Fushi) thành một kho mã độc lập
-(`hajisensai/fushi-subtitles`), và Hibiki nay phụ thuộc vào nó. Tệp thực thi dòng lệnh có tên là
+Được tách ra từ [Fushi](https://github.com/hajisensai/Fushi) thành một kho mã độc lập
+(`hajisensai/fushi-subtitles`), và Fushi nay phụ thuộc vào nó. Tệp thực thi dòng lệnh có tên là
 `fushi-subs`.
 
 ## Nó làm được gì

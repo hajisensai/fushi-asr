@@ -6,8 +6,8 @@
 Multilingual speech recognition that produces subtitles. **A pure-Dart core with a pluggable ONNX
 backend**, running server-side and driven from the CLI or the built-in web UI.
 
-Extracted from [Hibiki / Fushi](https://github.com/hajisensai/Fushi) into a standalone repository
-(`hajisensai/fushi-subtitles`), which Hibiki then depends on. The command-line executable is called
+Extracted from [Fushi](https://github.com/hajisensai/Fushi) into a standalone repository
+(`hajisensai/fushi-subtitles`), which Fushi then depends on. The command-line executable is called
 `fushi-subs`.
 
 ## What it does

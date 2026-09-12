@@ -7,8 +7,8 @@ Meertalige spraakherkenning die ondertitels oplevert. **Een kern volledig in Dar
 verwisselbare ONNX-backend**, die serverzijdig draait en wordt aangestuurd vanaf de opdrachtregel
 of via de ingebouwde web-UI.
 
-Losgemaakt uit [Hibiki / Fushi](https://github.com/hajisensai/Fushi) tot een zelfstandige repository
-(`hajisensai/fushi-subtitles`), waar Hibiki vervolgens van afhangt. Het uitvoerbare bestand voor de
+Losgemaakt uit [Fushi](https://github.com/hajisensai/Fushi) tot een zelfstandige repository
+(`hajisensai/fushi-subtitles`), waar Fushi vervolgens van afhangt. Het uitvoerbare bestand voor de
 opdrachtregel heet `fushi-subs`.
 
 ## Wat het doet

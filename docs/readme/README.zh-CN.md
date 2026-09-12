@@ -5,8 +5,8 @@
 
 多语言语音识别生成字幕。**纯 Dart 核心 + 可插拔 ONNX 后端**，跑在服务端，用 CLI 或网页界面调用。
 
-从 [Hibiki / Fushi](https://github.com/hajisensai/Fushi) 抽出为独立仓库（`hajisensai/fushi-subtitles`），
-Hibiki 反过来引用它。命令行可执行文件叫 `fushi-subs`。
+从 [Fushi](https://github.com/hajisensai/Fushi) 抽出为独立仓库（`hajisensai/fushi-subtitles`），
+Fushi 反过来引用它。命令行可执行文件叫 `fushi-subs`。
 
 ## 能做什么
 
