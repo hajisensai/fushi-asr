@@ -7,8 +7,8 @@ Altyazı üreten çok dilli konuşma tanıma. **Takılabilir bir ONNX arka ucuna
 yazılmış bir çekirdek**; sunucu tarafında çalışır, komut satırından ya da dahili web arayüzünden
 yönetilir.
 
-[Hibiki / Fushi](https://github.com/hajisensai/Fushi) projesinden ayrılarak bağımsız bir depoya
-(`hajisensai/fushi-subtitles`) taşındı; Hibiki artık bu depoya bağımlı. Komut satırı çalıştırılabilir
+[Fushi](https://github.com/hajisensai/Fushi) projesinden ayrılarak bağımsız bir depoya
+(`hajisensai/fushi-subtitles`) taşındı; Fushi artık bu depoya bağımlı. Komut satırı çalıştırılabilir
 dosyasının adı `fushi-subs`.
 
 ## Neler yapar
